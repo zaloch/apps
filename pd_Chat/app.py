@@ -22,6 +22,11 @@ from explainer import *
 #Music Player
 import base64
 
+#files
+main_logo = f"https://github.com/zaloch/apps/blob/main/pd_Chat/img/pdfchat2.jpg?raw=true"
+musique_file = f"https://github.com/zaloch/apps/blob/main/pd_Chat/musique/Boys%20(Summertime%20Love)%20-%20Sabrina%20(Salerno)%20-%20backingtrackx.com.mp3?raw=true"
+charming_guy = f"https://github.com/zaloch/apps/tree/main/pd_Chat/video.mp4?raw=true"
+
 #CSS
 st.set_page_config(page_title='pdfChat!', layout='wide')
 streamlit_style = """
@@ -84,9 +89,8 @@ st.markdown(streamlit_style, unsafe_allow_html=True)
 
 #Python Code
 def display_header() -> None:
-    st.image("https://github.com/zaloch/apps/blob/main/pd_Chat/img/pdfchat2.jpg?raw=true", width = 700, use_column_width = True)
+    st.image(main_logo, width = 700, use_column_width = True)
     #st.markdown('<div class="center-image"><img src="img/pdfchat.jpg" width="500"></div>', unsafe_allow_html=True)
-
 
 def display_footer() -> None:
     paypal_link = "https://www.paypal.me/zaloworks"  # Replace with your PayPal link
@@ -109,7 +113,6 @@ def display_footer() -> None:
         """
     st.markdown(footer_html, unsafe_allow_html=True)
 
-
 def display_widgets() -> tuple[UploadedFile, str]:
     #text_area = st.text_area("Copy and paste a section of the paper here, young padawan.", key = "area_for_text_unique")
     file = st.file_uploader("Or Upload your paper here, you lazy grad student.", type=["pdf"])
@@ -119,35 +122,6 @@ def display_widgets() -> tuple[UploadedFile, str]:
         st.error("So where's the pdf? Upload it or copy and paste it here.")
     #return file, text_area
     return file
-
-def extract_pdf() -> str:
-    #if "uploaded_pdf" not in st.session_state or "pasted_text" not in st.session_state:
-    #    st.session_state.uploaded_pdf, st.session_state.pasted_text = display_widgets()
-    
-    #uploaded_pdf, pasted_text = st.session_state.uploaded_pdf, st.session_state.pasted_text
-
-    uploaded_pdf = display_widgets()
-    #, pasted_text = display_widgets()
-
-    if uploaded_pdf:
-        pdf_reader = PyPDF2.PdfReader(uploaded_pdf)
-        extracted_text = ""
-
-        for page_num in range(len(pdf_reader.pages)):
-            page = pdf_reader.pages[page_num]
-            text = page.extract_text()
-            extracted_text += text
-
-        # Display PDF in a smaller window
-        st.markdown('<div class="media-container">', unsafe_allow_html=True)
-        st.markdown('<embed src="data:application/pdf;base64,{}" width="100%" height="600px" />'.format(
-            base64.b64encode(uploaded_pdf.read()).decode("utf-8")), unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        return extracted_text
-    #return pasted_text or ""
-    return ""
-
 
 def choose_voice():
     voices = tts.list_available_names()
@@ -180,7 +154,6 @@ def create_music_player(audio_file_path: str, initial_volume: float = 0.15) -> N
     st.markdown(audio_html, unsafe_allow_html=True)
     #st.write("Yaw, control them tunes here.")
 
-
 def create_autoplay_video_player(video_file_path: str) -> None:
     with open(video_file_path, "rb") as f:
         video_data = f.read()
@@ -197,7 +170,6 @@ def create_autoplay_video_player(video_file_path: str) -> None:
 
     st.markdown(video_html, unsafe_allow_html=True)
 
-
 def display_video_and_music_player(video_path: str, audio_file_path: str) -> None:
     st.markdown('<div class="media-container">', unsafe_allow_html=True)
     create_autoplay_video_player(video_path)
@@ -206,6 +178,34 @@ def display_video_and_music_player(video_path: str, audio_file_path: str) -> Non
     create_music_player(audio_file_path, initial_volume = 0.15)
     st.markdown('</div>', unsafe_allow_html=True)
 
+
+def extract_pdf() -> str:
+    #if "uploaded_pdf" not in st.session_state or "pasted_text" not in st.session_state:
+    #    st.session_state.uploaded_pdf, st.session_state.pasted_text = display_widgets()
+    
+    #uploaded_pdf, pasted_text = st.session_state.uploaded_pdf, st.session_state.pasted_text
+
+    uploaded_pdf = display_widgets()
+    #, pasted_text = display_widgets()
+
+    if uploaded_pdf:
+        pdf_reader = PyPDF2.PdfReader(uploaded_pdf)
+        extracted_text = ""
+
+        for page_num in range(len(pdf_reader.pages)):
+            page = pdf_reader.pages[page_num]
+            text = page.extract_text()
+            extracted_text += text
+
+        # Display PDF in a smaller window
+        st.markdown('<div class="media-container">', unsafe_allow_html=True)
+        st.markdown('<embed src="data:application/pdf;base64,{}" width="100%" height="600px" />'.format(
+            base64.b64encode(uploaded_pdf.read()).decode("utf-8")), unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        return extracted_text
+    #return pasted_text or ""
+    return ""
 
 def display_extracted_text(text: str, height: str = 500) -> None:
     custom_css = f"""
@@ -413,8 +413,7 @@ def main() -> None:
     st.button("🔄", on_click = new_chat, type='primary')
 
     # Display the video and music player
-    display_video_and_music_player('https://raw.githubusercontent.com/zaloch/apps/main/pd_Chat/video/charming_boy.mp4', f'https://github.com/zaloch/apps/blob/main/pd_Chat/musique/Boys%20(Summertime%20Love)%20-%20Sabrina%20(Salerno)%20-%20backingtrackx.com.mp3?raw=true')
-
+    display_video_and_music_player(charming_guy, musique_file)
 
 if __name__ == "__main__":
     main()
