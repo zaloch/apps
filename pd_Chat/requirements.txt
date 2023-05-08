@@ -1,3 +1,6 @@
 streamlit==1.20.0
 openai==0.27.2
+pypdf2==3.0.1
+langchain==0.0.161
+text-to-speech==1.6.0
 requests==2.28.2
