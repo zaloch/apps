@@ -24,8 +24,8 @@ import base64
 
 #files
 main_logo = f"https://github.com/zaloch/apps/blob/main/pd_Chat/img/pdfchat2.jpg?raw=true"
-musique_file = f"https://github.com/zaloch/apps/blob/main/pd_Chat/musique/Boys%20(Summertime%20Love)%20-%20Sabrina%20(Salerno)%20-%20backingtrackx.com.mp3?raw=true"
-charming_boy = f"https://github.com/zaloch/apps/blob/main/pd_Chat/video/charming_boy.mp4?raw=true"
+musique_file = f"https://github.com/zaloch/apps/blob/main/pd_Chat/musique/Boys%20(Summertime%20Love)%20-%20Sabrina%20(Salerno)%20-%20backingtrackx.com.mp3"
+charming_boy = f"https://raw.githubusercontent.com/zaloch/apps/main/pd_Chat/video/charming_boy.mp4"
 
 #CSS
 st.set_page_config(page_title='pdfChat!', layout='wide')
