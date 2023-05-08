@@ -25,7 +25,7 @@ import base64
 #files
 main_logo = f"https://github.com/zaloch/apps/blob/main/pd_Chat/img/pdfchat2.jpg?raw=true"
 musique_file = f"https://github.com/zaloch/apps/blob/main/pd_Chat/musique/Boys%20(Summertime%20Love)%20-%20Sabrina%20(Salerno)%20-%20backingtrackx.com.mp3?raw=true"
-charming_guy = f"https://github.com/zaloch/apps/tree/main/pd_Chat/video/video.mp4?raw=true"
+charming_boy = f"https://github.com/zaloch/apps/tree/main/pd_Chat/video/charming_boy.mp4?raw=true"
 
 #CSS
 st.set_page_config(page_title='pdfChat!', layout='wide')
@@ -413,7 +413,7 @@ def main() -> None:
     st.button("🔄", on_click = new_chat, type='primary')
 
     # Display the video and music player
-    display_video_and_music_player(charming_guy, musique_file)
+    display_video_and_music_player(charming_boy, musique_file)
 
 if __name__ == "__main__":
     main()
