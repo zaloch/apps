@@ -413,7 +413,7 @@ def main() -> None:
     st.button("🔄", on_click = new_chat, type='primary')
 
     # Display the video and music player
-    display_video_and_music_player('https://github.com/zaloch/apps/blob/main/pd_Chat/video/charming_boy.mp4', f'https://github.com/zaloch/apps/blob/main/pd_Chat/musique/Boys%20(Summertime%20Love)%20-%20Sabrina%20(Salerno)%20-%20backingtrackx.com.mp3')
+    display_video_and_music_player('https://raw.githubusercontent.com/zaloch/apps/main/pd_Chat/video/charming_boy.mp4', f'https://github.com/zaloch/apps/blob/main/pd_Chat/musique/Boys%20(Summertime%20Love)%20-%20Sabrina%20(Salerno)%20-%20backingtrackx.com.mp3?raw=true')
 
 
 if __name__ == "__main__":
