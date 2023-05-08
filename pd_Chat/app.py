@@ -84,7 +84,7 @@ st.markdown(streamlit_style, unsafe_allow_html=True)
 
 #Python Code
 def display_header() -> None:
-    st.image("/app/apps/pd_chat/img/pdfchat2.jpg", width = 700, use_column_width = True)
+    st.image("zalaoch/apps/main/pd_chat/img/pdfchat2.jpg", width = 700, use_column_width = True)
     #st.markdown('<div class="center-image"><img src="img/pdfchat.jpg" width="500"></div>', unsafe_allow_html=True)
 
 
@@ -413,7 +413,7 @@ def main() -> None:
     st.button("🔄", on_click = new_chat, type='primary')
 
     # Display the video and music player
-    display_video_and_music_player('/app/apps/pd_chat/video/charming_boy.mp4', 'musique/Boys (Summertime Love) - Sabrina (Salerno) - backingtrackx.com.mp3')
+    display_video_and_music_player('/zaloch/apps/main/pd_chat/video/charming_boy.mp4', 'musique/Boys (Summertime Love) - Sabrina (Salerno) - backingtrackx.com.mp3')
 
 
 if __name__ == "__main__":
