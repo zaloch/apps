@@ -17,14 +17,14 @@ from langchain.chat_models import ChatOpenAI
 
 #Text to Speech
 import text_to_speech as tts
-from explainer import *
+from prompting import *
 
 #Music Player
 import base64
 
 #files
 main_logo = f"https://github.com/zaloch/apps/blob/main/pd_Chat/img/pdfchat2.jpg?raw=true"
-musique_file = f"pd_Chat/musique/Boys%20(Summertime%20Love)%20-%20Sabrina%20(Salerno)%20-%20backingtrackx.com.mp3"
+musique_file = f"pd_Chat/musique/Boys (Summertime Love) - Sabrina (Salerno) - backingtrackx.com.mp3"
 charming_boy = f"pd_Chat/video/charming_boy.mp4"
 
 #CSS
@@ -39,17 +39,17 @@ streamlit_style = """
 
                     .media-container {
                         position: fixed;
-                        top: 2%;
+                        top: 81%;
                         right: 0;
                         width: 24%;
                         height: 100%;
-                        padding: 2rem;
+                        padding: 1rem;
                         overflow-y: auto;
                     }
 
                     .music-container {
                         position: fixed;
-                        top: 21%;
+                        top: 78%;
                         right: 0;
                         width: 24%;
                         height: 100%;
@@ -207,7 +207,22 @@ def extract_pdf() -> str:
     #return pasted_text or ""
     return ""
 
-def display_extracted_text(text: str, height: str = 500) -> None:
+def display_extracted_text(text: str, height: str = "500") -> None:
+    custom_css = f"""
+    <style>
+        .scrollable-text {{
+            height: {height}px;  /* Adjust height to control the number of visible lines */
+            overflow-y: auto;
+            background-color: #3b403d;  /* Set the background color to dark gray */
+            padding: 10px;  /* Add padding for spacing */
+        }}
+    </style>
+    """
+
+    st.markdown(custom_css, unsafe_allow_html=True)
+    st.markdown('<div class="scrollable-text">' + text.replace("\n", "<br>") + '</div>', unsafe_allow_html=True)
+
+def display_small_text(text: str, height: str = "200") -> None:
     custom_css = f"""
     <style>
         .scrollable-text {{
@@ -275,8 +290,8 @@ def main() -> None:
         # Option to preview memory buffer
         if st.checkbox("Preview memory buffer"):
             st.write(st.session_state.entity_memory.buffer)
-        MODEL = st.selectbox(label='Model', options=['gpt-3.5-turbo-0301','gpt-4','text-davinci-003','text-davinci-002'])
-        K = st.number_input(' (#)Summary of prompts to consider',min_value=0,max_value=1000)
+        MODEL = st.selectbox(label='Model', options=['gpt-3.5-turbo','gpt-4','text-davinci-003','text-davinci-002'])
+        K = st.number_input(' (#) Summary of prompts to consider',min_value=1,max_value=1000)
     st.sidebar.write(" ")
     API_O = display_api_input()
     st.sidebar.write(" ")
@@ -321,14 +336,13 @@ def main() -> None:
             llm = OpenAI(temperature=0,
                         openai_api_key=API_O, 
                         model_name=MODEL, 
-                        verbose=False) 
+                        verbose=False,
+                        max_tokens = 500) 
         
-
         # Create a ConversationEntityMemory object if not already created
         if 'entity_memory' not in st.session_state:
             st.session_state.entity_memory = ConversationEntityMemory(llm=llm, k=K)
             
-
         # Create the ConversationChain object with the specified configuration
         Conversation = ConversationChain(
                 llm=llm, 
@@ -342,52 +356,91 @@ def main() -> None:
             display_extracted_text(pdf_content)
             st.header("The blurb")
 
-            with st.spinner(text="Yeah science, b*%tch! - Jesse Pinkman ... probably"):
-                # Send the text in chunks of 4096 words to the API
-                chunks = ceil(len(pdf_content.split(" "))/100)
+            chunks = ceil(len(pdf_content.split(" "))/100)
 
+            with st.spinner(text="Yeah science, b*%!#h! - Jesse Pinkman ... probably"):
+                # Send the text in chunks of 4096 words to the API                
                 Conversation.run("You are a Scientist And you provide answers for the layperson in 100 words or less. Stricly limit yourself to this. Also remain engaging!")
 
                 title = Conversation.run(input = retrieve_better_title(text = pdf_content[0*len(pdf_content)//chunks:1*len(pdf_content)//chunks]))
-                st.session_state.past.append(title)
+                st.session_state.past.append(retrieve_better_title(text = ""))
                 st.session_state.generated.append(title)
 
+            st.warning("Did you try turning on the volume? - Bill Nye, perhaps")
+
+            st.write("                          ")   
+            st.write(f"**Layperson's Title:**")
+            display_small_text(f"{title}", height = 200)
+
+            #delete file if it exists
+            if os.path.isfile("title.mp3"):
+                os.remove("title.mp3")
+            
+            st.write("                          ")
+            with st.spinner(text= f"Let me get {selected_voice} the postdoc to do this for me..."):
+                tts.convert_text_to_mp3(
+                    message= title, voice_name=selected_voice, mp3_filename="title.mp3"
+                )
+
+            st.audio("title.mp3")
+
+            st.write("                          ")  
+            with st.spinner(text="I am the one who knocks! - Walter White"):
+
                 paper_content = Conversation.run(input = retrieve_paper_text(text = pdf_content[1*len(pdf_content)//chunks:2*len(pdf_content)//chunks]))
-                st.session_state.past.append(paper_content)
+                st.session_state.past.append(retrieve_paper_text(text = ""))
                 st.session_state.generated.append(paper_content)
 
-                references = Conversation.run(input = retrieve_key_references(text = pdf_content[-1*len(pdf_content)//chunks::]))
-                st.session_state.past.append(references)
-                st.session_state.generated.append(references)
-
-
-            #with st.spinner(text="Let me get a postdoc to do this for me..."):
-            #    tts.convert_text_to_mp3(
-            #        message= title, voice_name=selected_voice, mp3_filename="title.mp3"
-            #    )
+            st.write("                          ")  
+            # Format output
+            st.success("Ok here's your summary")
+            st.write("                          ")
+            st.write(f"**Summary:**")    
+            display_extracted_text(f"{paper_content}")
             
-            #with st.spinner(text =
-            #        "Eureka... - Every scientist ever\n"
-            #        "I've got it! - Archimedes, probably")
-            
-            #with st.spinner()):
+            #delete file if it exists
+            if os.path.isfile("paper_content.mp3"):
+                os.remove("paper_content.mp3")
+
+            #with st.spinner(text = f"Nobody: . . . Absolutely Nobody: (     ) Scientists: Eureka!!! - Every ... scientist ... ever"):
             #    tts.convert_text_to_mp3(
             #        message = paper_content,
             #        voice_name=selected_voice,
             #        mp3_filename="paper_content.mp3",
             #    )
 
-            # Format output
-            st.success("Ok here's your summary")
-            st.warning("Did you try turning on the volume? - Bill Nye, perhaps")
-            st.write("                          ")   
-            st.write(f"**Layperson's Title:**")
-            display_extracted_text(f"{title}", height = 200)
-            #st.audio("title.mp3")
-            st.write("                          ")
-            st.write(f"**Summary:**")    
-            display_extracted_text(f"{paper_content}")
             #st.audio("paper_content.mp3")
+
+            st.write("                          ")
+            with st.spinner(text=" "):
+
+                significance = Conversation.run(input = retrieve_significance(text = ""))
+                st.session_state.past.append(retrieve_significance(text = ""))
+                st.session_state.generated.append(significance)
+
+            st.write("                          ")   
+            st.write(f"**Significance:**")
+            display_small_text(f"{significance}", height = 200)
+
+            #delete file if it exists
+            if os.path.isfile("significance.mp3"):
+                os.remove("significance.mp3")
+
+            st.write("                          ")
+            with st.spinner(text= f"I think this is {selected_voice} my job?"):
+                tts.convert_text_to_mp3(
+                    message= significance, voice_name=selected_voice, mp3_filename="significance.mp3"
+                )
+
+            st.audio("significance.mp3")    
+
+            st.write("                          ")  
+            with st.spinner(text="They are not rocks, they are minerals, Marie! - Hank Schrader"):
+
+                references = Conversation.run(input = retrieve_key_references(text = pdf_content[-1*len(pdf_content)//chunks::]))
+                st.session_state.past.append(retrieve_key_references(text = ""))
+                st.session_state.generated.append(references)
+            
             st.write("                          ")
             st.write(f"**Key References:**")
             display_extracted_text(f"{references}", height = 400)
@@ -399,8 +452,8 @@ def main() -> None:
             # Display the conversation history using an expander, and allow the user to download it
             with st.expander("Conversation", expanded=True):
                 for i in range(len(st.session_state['generated'])-1, -1, -1):
-                    st.info(st.session_state["past"][i],icon="🧐")
-                    st.success(st.session_state["generated"][i], icon="🤖")
+                    st.info(st.session_state["past"][i],icon="🧑🏽‍🔬")
+                    st.success(st.session_state["generated"][i], icon="🦙")
                     download_str.append(st.session_state["past"][i])
                     download_str.append(st.session_state["generated"][i])
                 
