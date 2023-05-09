@@ -17,7 +17,7 @@ from langchain.chat_models import ChatOpenAI
 
 #Text to Speech
 import text_to_speech as tts
-from prompting import *
+from llm_prompting import *
 
 #Music Player
 import base64
