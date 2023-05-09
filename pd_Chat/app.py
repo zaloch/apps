@@ -423,19 +423,19 @@ def main() -> None:
             display_small_text(f"{significance}", height = 200)
 
             #delete file if it exists
-            if os.path.isfile("significance.mp3"):
-                os.remove("significance.mp3")
+            #if os.path.isfile("significance.mp3"):
+            #    os.remove("significance.mp3")
 
-            st.write("                          ")
-            with st.spinner(text= f"I think this is {selected_voice} my job?"):
-                tts.convert_text_to_mp3(
-                    message= significance, voice_name=selected_voice, mp3_filename="significance.mp3"
-                )
+            #st.write("                          ")
+            #with st.spinner(text= f"I think this is ... my job?"):
+            #    tts.convert_text_to_mp3(
+            #        message= significance, voice_name=selected_voice, mp3_filename="significance.mp3"
+            #    )
 
-            st.audio("significance.mp3")    
+            #st.audio("significance.mp3")    
 
             st.write("                          ")  
-            with st.spinner(text="They are not rocks, they are minerals, Marie! - Hank Schrader"):
+            with st.spinner(text="They are not rocks. They are minerals, Marie! - Hank Schrader"):
 
                 references = Conversation.run(input = retrieve_key_references(text = pdf_content[-1*len(pdf_content)//chunks::]))
                 st.session_state.past.append(retrieve_key_references(text = ""))
