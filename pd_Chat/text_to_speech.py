@@ -5,7 +5,7 @@ from typing import BinaryIO
 import requests
 from requests import Response
 
-API_KEY = os.getenv("ELEVENLABS_API_KEY")
+API_KEY =  os.getenv("ELEVENLABS_API_KEY")
 BASE_URL = "https://api.elevenlabs.io"
 
 

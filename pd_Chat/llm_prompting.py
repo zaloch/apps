@@ -33,9 +33,11 @@ def retrieve_ai_answer(response: dict) -> str:
     return response["choices"][0]["message"]["content"]
 
 
-retrieve_better_title = lambda text : "[Limit to less than 100 tokens] Can you provide a more engaging title for this paper? Think about a title that would be engaging and provocative for youtube." + f"\n\n" + text
+retrieve_better_title = lambda text : "[Limit: < 50 tokens] Can you provide a more engaging title for this paper? Think about a title that would be engaging and provocative." + f"\n\n" + text
 
-retrieve_paper_text = lambda text : "[Limit yourself to 500 tokens] Can you provide the abstract, introduction, methods, results and conclusions in 5-10 bullet points?." + f"\n\n" + text
+retrieve_paper_text = lambda text : "[Limit: 500 tokens] Can you provide the abstract, introduction, methods, results and conclusions in 5-10 bullet points?." + f"\n\n" + text
 
-retrieve_key_references = lambda text : "[Limit yourself to 100 tokens] Can you provide a list of the 5 key references for this paper listed in the references? Please include the title, authors, journal, year and DOI, and possibly the link if it is present. I do not need any external links just use the information in the references. Limit to 100 words. Abridge the citations if necessary" + f"\n\n" + text
+retrieve_significance = lambda text : "[Limit: 75 tokens] Can you provide a persuasive significance statement. 3 reasons why looking at this topic is important?" + f"\n\n" + text
+
+retrieve_key_references = lambda text : "[Limit: 100 tokens] Can you provide a list of the 5 key references for this paper listed in the references? Please include the title, authors, journal, year and DOI, and possibly the link if it is present. I do not need any external links just use the information in the references. Limit to 100 words. Abridge the citations if necessary" + f"\n\n" + text
 
