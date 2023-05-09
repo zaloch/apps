@@ -385,13 +385,13 @@ def main() -> None:
             if os.path.isfile("title.mp3"):
                 os.remove("title.mp3")
             
-            st.write("                          ")
-            with st.spinner(text= f"Let me get {selected_voice} the postdoc to do this for me..."):
-                tts.convert_text_to_mp3(
-                    message= title, voice_name=selected_voice, mp3_filename="title.mp3"
-                )
+            #st.write("                          ")
+            #with st.spinner(text= f"Let me get {selected_voice} the postdoc to do this for me..."):
+            #    tts.convert_text_to_mp3(
+            #        message= title, voice_name=selected_voice, mp3_filename="title.mp3"
+            #    )
 
-            st.audio("title.mp3")
+            #st.audio("title.mp3")
 
             st.write("                          ")  
             with st.spinner(text="I am the one who knocks! - Walter White"):
@@ -420,16 +420,16 @@ def main() -> None:
 
             #st.audio("paper_content.mp3")
 
-            st.write("                          ")
-            with st.spinner(text=" "):
+            #st.write("                          ")
+            #with st.spinner(text=" "):
 
-                significance = Conversation.run(input = retrieve_significance(text = ""))
-                st.session_state.past.append(retrieve_significance(text = ""))
-                st.session_state.generated.append(significance)
+            #    significance = Conversation.run(input = retrieve_significance(text = ""))
+            #    st.session_state.past.append(retrieve_significance(text = ""))
+            #    st.session_state.generated.append(significance)
 
-            st.write("                          ")   
-            st.write(f"**Significance:**")
-            display_small_text(f"{significance}", height = 200)
+            #st.write("                          ")   
+            #st.write(f"**Significance:**")
+            #display_small_text(f"{significance}", height = 200)
 
             #delete file if it exists
             #if os.path.isfile("significance.mp3"):
