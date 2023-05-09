@@ -212,7 +212,7 @@ def get_text() -> str:
     Get the user input text.
     """
     input_text = st.text_input("You: ", st.session_state["input"], key="input",
-                            placeholder="Your AI assistant here! Ask me anything ...", 
+                            placeholder="Type anything in relation to the article here ...", 
                             label_visibility='hidden')
     return input_text
 
@@ -420,16 +420,16 @@ def main() -> None:
 
             #st.audio("paper_content.mp3")
 
-            #st.write("                          ")
-            #with st.spinner(text=" "):
+            st.write("                          ")
+            with st.spinner(text="S'All Good, Man - Saul Goodman"):
 
-            #    significance = Conversation.run(input = retrieve_significance(text = ""))
-            #    st.session_state.past.append(retrieve_significance(text = ""))
-            #    st.session_state.generated.append(significance)
+                significance = Conversation.run(input = retrieve_significance(text = ""))
+                st.session_state.past.append(retrieve_significance(text = ""))
+                st.session_state.generated.append(significance)
 
-            #st.write("                          ")   
-            #st.write(f"**Significance:**")
-            #display_small_text(f"{significance}", height = 200)
+            st.write("                          ")   
+            st.write(f"**Significance:**")
+            display_small_text(f"{significance}", height = 200)
 
             #delete file if it exists
             #if os.path.isfile("significance.mp3"):
@@ -464,6 +464,7 @@ def main() -> None:
                 output = Conversation.run(input=user_input)  
                 st.session_state.past.append(user_input)
                 st.session_state.generated.append(output)
+                display_small_text(f"{output}", height = 200)
 
             st.write("                          ")
             st.write("                          ")
