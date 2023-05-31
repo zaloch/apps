@@ -23,9 +23,9 @@ from llm_prompting import *
 import base64
 
 #files
-main_logo = f"pd_Chat/img/scientificllamasmain.jpg"
-musique_file = f"pd_Chat/musique/Boys (Summertime Love) - Sabrina (Salerno) - backingtrackx.com.mp3"
-charming_boy = f"pd_Chat/video/charming_boy.mp4"
+main_logo = f"scientificllamas/img/scientificllamasmain.jpg"
+musique_file = f"scientificllamas/musique/Boys (Summertime Love) - Sabrina (Salerno) - backingtrackx.com.mp3"
+charming_boy = f"scientificllamas/video/charming_boy.mp4"
 
 #CSS
 st.set_page_config(page_title='pdfChat!', layout='wide')
