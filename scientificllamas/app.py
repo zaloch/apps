@@ -23,7 +23,7 @@ from llm_prompting import *
 import base64
 
 #files
-main_logo = f"scientificllamas/img/scientificllamasmain.jpg"
+main_logo = f"scientificllamas/img/scientificllamaslogoimg.jpg"
 musique_file = f"scientificllamas/musique/Boys (Summertime Love) - Sabrina (Salerno) - backingtrackx.com.mp3"
 charming_boy = f"scientificllamas/video/charming_boy.mp4"
 
