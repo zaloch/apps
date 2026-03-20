@@ -1,12 +1,16 @@
 # Homer - Sample Data Generator
 # Creates realistic HALO-like data for testing and demonstration
+# Aligned with anima HaloAnalysis column conventions
 
 import pandas as pd
 import numpy as np
 
 
 def generate_object_data(n_cells: int = 5000, n_images: int = 3) -> pd.DataFrame:
-    """Generate realistic HALO object-level (cell-by-cell) data."""
+    """Generate realistic HALO object-level (cell-by-cell) data.
+
+    Column naming matches actual HALO exports as used in the anima module.
+    """
     rng = np.random.default_rng(42)
 
     images = [f"Slide_{i+1}_Region_{j+1}" for i in range(n_images) for j in range(2)]
@@ -22,16 +26,13 @@ def generate_object_data(n_cells: int = 5000, n_images: int = 3) -> pd.DataFrame
         annotation = rng.choice(annotations, p=[0.4, 0.3, 0.1, 0.2])
         phenotype = rng.choice(phenotypes, p=[0.15, 0.15, 0.05, 0.1, 0.15, 0.1, 0.3])
 
-        # Spatial coordinates
         x_loc = rng.uniform(0, 50000)
         y_loc = rng.uniform(0, 50000)
 
-        # Cell morphology
         nucleus_area = rng.lognormal(4.5, 0.5)
         cytoplasm_area = nucleus_area * rng.uniform(1.5, 4.0)
         cell_area = nucleus_area + cytoplasm_area
 
-        # Marker intensities (vary by phenotype)
         base_cd3 = 0.8 if "CD3+" in phenotype else 0.1
         base_cd4 = 0.7 if "CD4+" in phenotype else 0.05
         base_cd8 = 0.7 if "CD8+" in phenotype else 0.05
@@ -73,16 +74,30 @@ def generate_object_data(n_cells: int = 5000, n_images: int = 3) -> pd.DataFrame
 
 
 def generate_summary_data(n_images: int = 12) -> pd.DataFrame:
-    """Generate realistic HALO summary-level data."""
+    """Generate realistic HALO summary-level data.
+
+    Column naming matches actual HALO analysis output as used in the anima module:
+    - Image Tag, Algorithm Name, Job Id (HALO metadata)
+    - Sample ID (derived, .scn stripped)
+    - Analysis Region, Total Cells, fraction columns with "%"
+    - Region Area, H-Score, Intensity columns
+    - Weak/Strong/Moderate classification columns
+    """
     rng = np.random.default_rng(42)
 
-    images = [f"Patient_{i+1:03d}_Slide_{j+1}" for i in range(n_images // 2) for j in range(2)]
+    image_tags = [f"Patient_{i+1:03d}_Biopsy.scn" for i in range(n_images)]
+    algorithms = ["Multiplex IHC v3.2.1", "Highplex FL v4.2.3"]
     regions = ["Tumor", "Stroma"]
 
     records = []
-    for image in images:
+    for image_tag in image_tags:
+        algo = rng.choice(algorithms)
+        job_id = rng.integers(100000, 999999)
+
         for region in regions:
             total_cells = rng.integers(500, 15000)
+
+            # Channel-specific cell counts and fractions
             cd3_pct = rng.uniform(5, 45) if region == "Tumor" else rng.uniform(10, 60)
             cd4_pct = cd3_pct * rng.uniform(0.3, 0.6)
             cd8_pct = cd3_pct * rng.uniform(0.2, 0.5)
@@ -90,28 +105,102 @@ def generate_summary_data(n_images: int = 12) -> pd.DataFrame:
             cd68_pct = rng.uniform(5, 35)
             pdl1_pct = rng.uniform(0, 40)
 
-            analyzed_area = rng.uniform(0.5, 5.0)
-            density = total_cells / analyzed_area
+            # Weak/Moderate/Strong for CD3
+            cd3_total = int(total_cells * cd3_pct / 100)
+            cd3_weak_pct = rng.uniform(20, 50)
+            cd3_mod_pct = rng.uniform(20, 50)
+            cd3_strong_pct = 100 - cd3_weak_pct - cd3_mod_pct
+
+            region_area = rng.uniform(50000, 500000)  # um^2
+            analyzed_area = rng.uniform(0.5, 5.0)     # mm^2
 
             records.append({
-                "Image": image,
+                "Image Tag": image_tag,
+                "Algorithm Name": algo,
+                "Job Id": int(job_id),
                 "Analysis Region": region,
+                # Derived by parse_halo_data:
+                # "Sample ID" will be added by preprocess_halo_summary
+
+                # Cell counts (total_data pattern: "Cells" without "%")
                 "Total Cells": int(total_cells),
-                "Total CD3+ Cells": int(total_cells * cd3_pct / 100),
-                "% CD3 Positive": round(cd3_pct, 2),
-                "Total CD4+ Cells": int(total_cells * cd4_pct / 100),
-                "% CD4 Positive": round(cd4_pct, 2),
-                "Total CD8+ Cells": int(total_cells * cd8_pct / 100),
-                "% CD8 Positive": round(cd8_pct, 2),
-                "Total CD20+ Cells": int(total_cells * cd20_pct / 100),
-                "% CD20 Positive": round(cd20_pct, 2),
-                "Total CD68+ Cells": int(total_cells * cd68_pct / 100),
-                "% CD68 Positive": round(cd68_pct, 2),
-                "Total PD-L1+ Cells": int(total_cells * pdl1_pct / 100),
-                "% PD-L1 Positive": round(pdl1_pct, 2),
+                "CD3+ Cells": int(cd3_total),
+                "CD4+ Cells": int(total_cells * cd4_pct / 100),
+                "CD8+ Cells": int(total_cells * cd8_pct / 100),
+                "CD20+ Cells": int(total_cells * cd20_pct / 100),
+                "CD68+ Cells": int(total_cells * cd68_pct / 100),
+                "PD-L1+ Cells": int(total_cells * pdl1_pct / 100),
+
+                # Fraction data (fraction_data pattern: "Cells" with "%")
+                "% CD3+ Cells": round(cd3_pct, 2),
+                "% CD4+ Cells": round(cd4_pct, 2),
+                "% CD8+ Cells": round(cd8_pct, 2),
+                "% CD20+ Cells": round(cd20_pct, 2),
+                "% CD68+ Cells": round(cd68_pct, 2),
+                "% PD-L1+ Cells": round(pdl1_pct, 2),
+
+                # Weak/Moderate/Strong breakdown
+                "% CD3 Weak Cells": round(cd3_weak_pct * cd3_pct / 100, 2),
+                "% CD3 Moderate Cells": round(cd3_mod_pct * cd3_pct / 100, 2),
+                "% CD3 Strong Cells": round(cd3_strong_pct * cd3_pct / 100, 2),
+
+                # Negative
+                "% Negative Cells": round(100 - cd3_pct - cd20_pct - cd68_pct, 2),
+
+                # Intensity data (intensity_data pattern: "H-Score" or "Intensity")
+                "CD3 H-Score": round(rng.uniform(0, 300), 1),
+                "PD-L1 H-Score": round(rng.uniform(0, 300), 1),
+                "DAPI Nucleus Intensity": round(rng.lognormal(5.0, 0.3), 2),
+
+                # Spatial data
+                "Region Area (μm²)": round(region_area, 2),
                 "Analyzed Area (mm^2)": round(analyzed_area, 3),
-                "Cell Density (cells/mm^2)": round(density, 1),
-                "H-Score": round(rng.uniform(0, 300), 1),
+                "Cell Density (cells/mm^2)": round(total_cells / analyzed_area, 1),
+
+                # Channel-specific (Spectrum/Cy5 pattern from anima)
+                "Spectrum FITC Cy5 Positive Cells": int(total_cells * rng.uniform(0.05, 0.3)),
+                "% Spectrum FITC Cy5 Positive Cells": round(rng.uniform(5, 30), 2),
             })
+
+    return pd.DataFrame(records)
+
+
+def generate_cluster_data(n_clusters: int = 200, n_images: int = 4) -> pd.DataFrame:
+    """Generate realistic HALO cluster/aggregated object data.
+
+    Matches the output of HaloIngest.aggregate_data from anima.
+    """
+    rng = np.random.default_rng(42)
+
+    image_tags = [f"Sample_{i+1:03d}.scn" for i in range(n_images)]
+    algorithms = ["Multiplex IHC v3.2.1"]
+
+    records = []
+    for _ in range(n_clusters):
+        image_tag = rng.choice(image_tags)
+        algo = algorithms[0]
+        job_id = rng.integers(100000, 999999)
+
+        total_cells = rng.integers(10, 500)
+        region_area = rng.uniform(1000, 50000)
+
+        records.append({
+            "Sample ID": image_tag.replace(".scn", ""),
+            "Algorithm Name": algo,
+            "Job ID": int(job_id),
+            "Total Cluster Count": rng.integers(1, 50),
+            "Total Cell Count": int(total_cells),
+            "Total Area Analyzed": round(region_area, 2),
+            "Total Cells": int(total_cells),
+            "Region Area (μm²)": round(region_area, 2),
+            "% CD3+ Cells": round(rng.uniform(0, 60), 2),
+            "% CD4+ Cells": round(rng.uniform(0, 40), 2),
+            "% CD8+ Cells": round(rng.uniform(0, 40), 2),
+            "% CD20+ Cells": round(rng.uniform(0, 25), 2),
+            "% CD68+ Cells": round(rng.uniform(0, 40), 2),
+            "% PD-L1+ Cells": round(rng.uniform(0, 45), 2),
+            "CD3 H-Score": round(rng.uniform(0, 300), 1),
+            "DAPI Nucleus Intensity": round(rng.lognormal(5.0, 0.3), 2),
+        })
 
     return pd.DataFrame(records)

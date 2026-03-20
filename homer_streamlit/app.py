@@ -1,5 +1,6 @@
 # Homer - Halo Output Mapper & Explorer for Research (Streamlit Version)
 # A data dashboard for HALO by Indica Labs image analysis data
+# Aligned with anima/HaloAnalysis workflows and column conventions
 __author__ = "Gonzalo Zeballos"
 __license__ = "GNU GPLv3"
 __version__ = "1.0"
@@ -16,15 +17,19 @@ from io import BytesIO
 from homer_core.data_parser import (
     load_uploaded_file, parse_halo_data, apply_filters,
     get_filterable_columns, get_plottable_numeric_columns, get_grouping_columns,
+    get_phenotype_columns, dezero, remove_outliers,
     HaloDataset,
 )
 from homer_core.plotting import (
     create_bar_chart, create_stacked_bar_chart, create_scatter_plot,
     create_box_plot, create_violin_plot, create_histogram, create_heatmap,
-    create_xy_line_plot, fig_to_png_bytes, fig_to_svg_bytes,
+    create_xy_line_plot, create_strip_plot, create_swarm_plot,
+    create_outlier_comparison, create_pairplot_matrix,
+    create_sample_overview_strip,
+    fig_to_png_bytes, fig_to_svg_bytes,
 )
 from homer_core.report_generator import ReportBuilder, generate_data_summary_page
-from homer_core.sample_data import generate_object_data, generate_summary_data
+from homer_core.sample_data import generate_object_data, generate_summary_data, generate_cluster_data
 
 
 # ── Page Config ──────────────────────────────────────────────────────────────
@@ -77,13 +82,7 @@ html, body, [class*="css"] {
 
 .badge-object { background: #d4edda; color: #155724; }
 .badge-summary { background: #cce5ff; color: #004085; }
-
-.metric-card {
-    background: #f8f9fa;
-    padding: 1rem;
-    border-radius: 8px;
-    border-left: 4px solid #2E86AB;
-}
+.badge-cluster { background: #fff3cd; color: #856404; }
 
 .footer {
     position: fixed;
@@ -114,7 +113,7 @@ if "plot_counter" not in st.session_state:
     st.session_state.plot_counter = 0
 
 
-# ── Header ───────────────────────────────────────────────────────────────────
+# ── Header / Footer ─────────────────────────────────────────────────────────
 
 def display_header():
     st.markdown("""
@@ -146,28 +145,38 @@ def render_sidebar():
 
     force_type = st.sidebar.radio(
         "Data type detection",
-        ["Auto-detect", "Force Object Data", "Force Summary Data"],
+        ["Auto-detect", "Force Object Data", "Force Summary Data", "Force Cluster Data"],
         index=0,
     )
 
-    # Demo data option
+    # HALO-specific options
+    with st.sidebar.expander("HALO Options"):
+        max_job = st.checkbox("Keep only latest Job Id per sample", value=False, key="max_job")
+        analysis_area = st.text_input("Filter Analysis Region (blank = all)", value="", key="analysis_area")
+
+    # Demo data
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Demo Data")
-    demo_col1, demo_col2 = st.sidebar.columns(2)
-    load_demo_object = demo_col1.button("Object Demo", use_container_width=True)
-    load_demo_summary = demo_col2.button("Summary Demo", use_container_width=True)
+    dc1, dc2, dc3 = st.sidebar.columns(3)
+    load_demo_object = dc1.button("Object", use_container_width=True)
+    load_demo_summary = dc2.button("Summary", use_container_width=True)
+    load_demo_cluster = dc3.button("Cluster", use_container_width=True)
 
     if load_demo_object:
         df = generate_object_data(n_cells=5000, n_images=3)
-        dataset = parse_halo_data(df, "demo_object_data.csv", force_type="object")
-        st.session_state.dataset = dataset
+        st.session_state.dataset = parse_halo_data(df, "demo_object_data.csv", force_type="object")
         st.session_state.filters = {}
         st.rerun()
 
     if load_demo_summary:
         df = generate_summary_data(n_images=12)
-        dataset = parse_halo_data(df, "demo_summary_data.csv", force_type="summary")
-        st.session_state.dataset = dataset
+        st.session_state.dataset = parse_halo_data(df, "demo_summary_data.csv")
+        st.session_state.filters = {}
+        st.rerun()
+
+    if load_demo_cluster:
+        df = generate_cluster_data(n_clusters=200, n_images=4)
+        st.session_state.dataset = parse_halo_data(df, "demo_cluster_data.csv", force_type="cluster")
         st.session_state.filters = {}
         st.rerun()
 
@@ -175,11 +184,16 @@ def render_sidebar():
         try:
             df = load_uploaded_file(uploaded_file, uploaded_file.name)
             ft = None
-            if force_type == "Force Object Data":
+            if "Object" in force_type:
                 ft = "object"
-            elif force_type == "Force Summary Data":
+            elif "Summary" in force_type:
                 ft = "summary"
-            dataset = parse_halo_data(df, uploaded_file.name, force_type=ft)
+            elif "Cluster" in force_type:
+                ft = "cluster"
+
+            area = analysis_area if analysis_area else None
+            dataset = parse_halo_data(df, uploaded_file.name, force_type=ft,
+                                      max_job=max_job, analysis_area=area)
             st.session_state.dataset = dataset
             st.session_state.filters = {}
         except Exception as e:
@@ -192,36 +206,54 @@ def render_sidebar():
         st.sidebar.markdown("### Filters")
 
         filterable = get_filterable_columns(dataset)
-        # Limit to columns with reasonable cardinality
-        filterable = [c for c in filterable if dataset.df[c].nunique() <= 100]
+        filterable = [c for c in filterable if c in dataset.df.columns and dataset.df[c].nunique() <= 100]
 
         new_filters = {}
-        for col in filterable[:8]:  # Max 8 filter widgets
+        for col in filterable[:8]:
             unique_vals = sorted(dataset.df[col].dropna().unique().tolist(), key=str)
-            selected = st.sidebar.multiselect(
-                f"{col}",
-                options=unique_vals,
-                default=[],
-                key=f"filter_{col}",
-            )
+            selected = st.sidebar.multiselect(f"{col}", options=unique_vals, default=[], key=f"filter_{col}")
             if selected:
                 new_filters[col] = selected
-
         st.session_state.filters = new_filters
 
-        # Data info
+        # Dataset info
         st.sidebar.markdown("---")
         st.sidebar.markdown("### Dataset Info")
-        badge_class = "badge-object" if dataset.data_type == "object" else "badge-summary"
+        badge_map = {"object": "badge-object", "summary": "badge-summary", "cluster": "badge-cluster"}
+        badge_class = badge_map.get(dataset.data_type, "badge-summary")
         st.sidebar.markdown(
             f'<span class="data-badge {badge_class}">{dataset.data_type.upper()} DATA</span>',
             unsafe_allow_html=True,
         )
         st.sidebar.markdown(f"**File:** {dataset.filename}")
-
         filtered_df = apply_filters(dataset.df, st.session_state.filters)
         st.sidebar.markdown(f"**Rows:** {len(filtered_df):,} / {len(dataset.df):,}")
         st.sidebar.markdown(f"**Columns:** {len(dataset.df.columns)}")
+
+        if dataset.algorithm_names:
+            st.sidebar.markdown(f"**Algorithms:** {', '.join(str(a) for a in dataset.algorithm_names)}")
+        if dataset.sample_ids:
+            st.sidebar.markdown(f"**Samples:** {len(dataset.sample_ids)}")
+
+        # Column classification summary
+        with st.sidebar.expander("Column Groups (anima-style)"):
+            groups = [
+                ("Intensity (H-Score/Intensity)", dataset.intensity_columns),
+                ("Cell Columns", dataset.cell_columns),
+                ("Total (counts)", dataset.total_columns),
+                ("Fraction (%)", dataset.fraction_columns),
+                ("Phenotype Totals", dataset.phenotype_total_columns),
+                ("Phenotype Fractions", dataset.phenotype_fraction_columns),
+                ("Channel Totals (Spectrum/Cy5)", dataset.channel_total_columns),
+                ("Channel Fractions", dataset.channel_fraction_columns),
+                ("Spatial", dataset.spatial_columns),
+                ("Coordinate", dataset.coordinate_columns),
+                ("Area", dataset.area_columns),
+            ]
+            for name, cols in groups:
+                if cols:
+                    st.markdown(f"**{name}** ({len(cols)})")
+                    st.caption(", ".join(cols[:5]) + ("..." if len(cols) > 5 else ""))
 
 
 # ── Plot Builder ─────────────────────────────────────────────────────────────
@@ -232,14 +264,17 @@ PLOT_TYPES = [
     "Scatter Plot",
     "Box Plot",
     "Violin Plot",
+    "Strip Plot",
+    "Swarm Plot",
     "Histogram",
     "XY Line Plot",
     "Heatmap",
+    "Pairplot Matrix",
+    "Sample Overview",
 ]
 
 
 def render_plot_builder(dataset: HaloDataset, filtered_df: pd.DataFrame):
-    """Render the interactive plot configuration panel."""
     st.markdown("### Plot Builder")
 
     col_config, col_preview = st.columns([1, 2])
@@ -248,19 +283,29 @@ def render_plot_builder(dataset: HaloDataset, filtered_df: pd.DataFrame):
         plot_type = st.selectbox("Plot Type", PLOT_TYPES)
 
         numeric_cols = get_plottable_numeric_columns(dataset)
-        # Include categorical columns that exist in filtered_df
-        all_cols = list(filtered_df.columns)
         grouping_cols = get_grouping_columns(dataset)
+        phenotype_cols = get_phenotype_columns(dataset)
 
-        # X axis
-        if plot_type in ("Histogram",):
+        # Axis selection based on plot type
+        x_col = y_col = None
+
+        if plot_type == "Histogram":
             x_col = st.selectbox("Variable", numeric_cols, key="x_col")
-            y_col = None
-        elif plot_type in ("Box Plot", "Violin Plot"):
+        elif plot_type in ("Box Plot", "Violin Plot", "Strip Plot", "Swarm Plot"):
             x_col = st.selectbox("Grouping (X)", ["(None)"] + grouping_cols, key="x_col")
             if x_col == "(None)":
                 x_col = None
             y_col = st.selectbox("Value (Y)", numeric_cols, key="y_col")
+        elif plot_type == "Pairplot Matrix":
+            default_cols = phenotype_cols[:5] if phenotype_cols else numeric_cols[:5]
+            pair_cols = st.multiselect("Columns for pairplot", numeric_cols, default=default_cols, key="pair_cols")
+        elif plot_type == "Sample Overview":
+            sample_col = st.selectbox("Sample Column", grouping_cols,
+                                       index=grouping_cols.index("Sample ID") if "Sample ID" in grouping_cols else 0,
+                                       key="sample_col")
+            overview_metrics = st.multiselect("Metrics", numeric_cols,
+                                              default=phenotype_cols[:4] if phenotype_cols else numeric_cols[:4],
+                                              key="overview_metrics")
         else:
             if plot_type in ("Bar Chart", "Stacked Bar Chart"):
                 x_col = st.selectbox("X Axis", grouping_cols + numeric_cols, key="x_col")
@@ -269,37 +314,36 @@ def render_plot_builder(dataset: HaloDataset, filtered_df: pd.DataFrame):
             y_col = st.selectbox("Y Axis", numeric_cols, key="y_col")
 
         # Color/group
-        color_col = st.selectbox(
-            "Color / Group By",
-            ["(None)"] + grouping_cols,
-            key="color_col",
-        )
-        if color_col == "(None)":
-            color_col = None
+        color_col = None
+        if plot_type not in ("Pairplot Matrix", "Sample Overview"):
+            color_col = st.selectbox("Color / Group By", ["(None)"] + grouping_cols, key="color_col")
+            if color_col == "(None)":
+                color_col = None
 
-        # Plot-specific options
         title = st.text_input("Chart Title", value="", key="chart_title")
 
+        # Plot-specific options
         orientation = "v"
         barmode = "group"
         normalize = False
         trendline = None
         points = "outliers"
         nbins = 50
+        agg_func = "mean"
 
         if plot_type == "Bar Chart":
-            orientation = st.radio("Orientation", ["Vertical", "Horizontal"], key="orient")
-            orientation = "v" if orientation == "Vertical" else "h"
+            orientation = "v" if st.radio("Orientation", ["Vertical", "Horizontal"], key="orient") == "Vertical" else "h"
             barmode = st.radio("Bar Mode", ["group", "overlay"], key="barmode")
+            agg_func = st.selectbox("Aggregation", ["mean", "median", "sum", "count"], key="agg_func")
 
         elif plot_type == "Stacked Bar Chart":
-            orientation = st.radio("Orientation", ["Vertical", "Horizontal"], key="orient")
-            orientation = "v" if orientation == "Vertical" else "h"
+            orientation = "v" if st.radio("Orientation", ["Vertical", "Horizontal"], key="orient") == "Vertical" else "h"
             normalize = st.checkbox("Normalize to 100%", key="normalize")
+            agg_func = st.selectbox("Aggregation", ["mean", "median", "sum", "count"], key="agg_func")
 
         elif plot_type == "Scatter Plot":
-            trendline_opt = st.selectbox("Trendline", ["None", "OLS", "LOWESS"], key="trend")
-            trendline = None if trendline_opt == "None" else trendline_opt.lower()
+            trend = st.selectbox("Trendline", ["None", "OLS", "LOWESS"], key="trend")
+            trendline = None if trend == "None" else trend.lower()
 
         elif plot_type in ("Box Plot", "Violin Plot"):
             points = st.selectbox("Show Points", ["outliers", "all", "suspectedoutliers", False], key="points")
@@ -307,123 +351,171 @@ def render_plot_builder(dataset: HaloDataset, filtered_df: pd.DataFrame):
         elif plot_type == "Histogram":
             nbins = st.slider("Number of Bins", 10, 200, 50, key="nbins")
 
-        # Aggregation for bar charts
-        agg_func = "mean"
-        if plot_type in ("Bar Chart", "Stacked Bar Chart"):
-            agg_func = st.selectbox("Aggregation", ["mean", "median", "sum", "count"], key="agg_func")
-
         generate_btn = st.button("Generate Plot", type="primary", use_container_width=True)
 
     with col_preview:
-        if generate_btn or st.session_state.plot_counter > 0:
-            if generate_btn:
-                st.session_state.plot_counter += 1
+        if generate_btn:
+            st.session_state.plot_counter += 1
 
             try:
                 plot_df = filtered_df.copy()
+                fig = None
 
-                # For bar charts, aggregate the data
-                if plot_type in ("Bar Chart", "Stacked Bar Chart") and y_col:
+                # Aggregate for bar charts
+                if plot_type in ("Bar Chart", "Stacked Bar Chart") and y_col and x_col:
                     group_cols = [x_col]
                     if color_col:
                         group_cols.append(color_col)
                     plot_df = plot_df.groupby(group_cols, as_index=False)[y_col].agg(agg_func)
 
-                fig = None
-
                 if plot_type == "Bar Chart":
-                    fig = create_bar_chart(
-                        plot_df, x_col, y_col, color=color_col,
-                        orientation=orientation, barmode=barmode, title=title,
-                    )
+                    fig = create_bar_chart(plot_df, x_col, y_col, color=color_col,
+                                           orientation=orientation, barmode=barmode, title=title)
                 elif plot_type == "Stacked Bar Chart":
                     if not color_col:
                         st.warning("Stacked bar charts require a Color/Group By column.")
                     else:
-                        fig = create_stacked_bar_chart(
-                            plot_df, x_col, y_col, color=color_col,
-                            orientation=orientation, title=title, normalize=normalize,
-                        )
+                        fig = create_stacked_bar_chart(plot_df, x_col, y_col, color=color_col,
+                                                       orientation=orientation, title=title, normalize=normalize)
                 elif plot_type == "Scatter Plot":
-                    fig = create_scatter_plot(
-                        plot_df, x_col, y_col, color=color_col,
-                        title=title, trendline=trendline,
-                    )
+                    fig = create_scatter_plot(plot_df, x_col, y_col, color=color_col,
+                                              title=title, trendline=trendline)
                 elif plot_type == "Box Plot":
-                    fig = create_box_plot(
-                        plot_df, x_col, y_col, color=color_col,
-                        title=title, points=points,
-                    )
+                    fig = create_box_plot(plot_df, x_col, y_col, color=color_col,
+                                          title=title, points=points)
                 elif plot_type == "Violin Plot":
-                    fig = create_violin_plot(
-                        plot_df, x_col, y_col, color=color_col, title=title,
-                    )
+                    fig = create_violin_plot(plot_df, x_col, y_col, color=color_col, title=title)
+                elif plot_type == "Strip Plot":
+                    fig = create_strip_plot(plot_df, x_col or "index", y_col, color=color_col, title=title)
+                elif plot_type == "Swarm Plot":
+                    fig = create_swarm_plot(plot_df, x_col or "index", y_col, color=color_col, title=title)
                 elif plot_type == "Histogram":
-                    fig = create_histogram(
-                        plot_df, x_col, color=color_col,
-                        nbins=nbins, title=title,
-                    )
+                    fig = create_histogram(plot_df, x_col, color=color_col, nbins=nbins, title=title)
                 elif plot_type == "XY Line Plot":
-                    fig = create_xy_line_plot(
-                        plot_df, x_col, y_col, color=color_col, title=title,
-                    )
+                    fig = create_xy_line_plot(plot_df, x_col, y_col, color=color_col, title=title)
                 elif plot_type == "Heatmap":
-                    if not y_col:
-                        st.warning("Heatmap requires both X and Y axes.")
-                    else:
-                        z_col = st.selectbox("Value (Z/Color)", numeric_cols, key="z_col")
+                    z_col = st.selectbox("Value (Z/Color)", numeric_cols, key="z_col")
+                    if y_col:
                         fig = create_heatmap(plot_df, x_col, y_col, z_col, title=title)
+                elif plot_type == "Pairplot Matrix":
+                    if pair_cols and len(pair_cols) >= 2:
+                        fig = create_pairplot_matrix(plot_df, pair_cols, color=color_col, title=title)
+                    else:
+                        st.warning("Select at least 2 columns for pairplot.")
+                elif plot_type == "Sample Overview":
+                    if overview_metrics:
+                        fig = create_sample_overview_strip(plot_df, overview_metrics,
+                                                           sample_col=sample_col, title=title)
+                    else:
+                        st.warning("Select at least 1 metric.")
 
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
-
-                    # Download buttons
-                    dl_col1, dl_col2, dl_col3 = st.columns(3)
-                    with dl_col1:
-                        try:
-                            png_bytes = fig_to_png_bytes(fig)
-                            st.download_button(
-                                "Download PNG",
-                                data=png_bytes,
-                                file_name=f"homer_plot_{st.session_state.plot_counter}.png",
-                                mime="image/png",
-                            )
-                        except Exception:
-                            st.info("Install kaleido for PNG export: pip install kaleido")
-
-                    with dl_col2:
-                        try:
-                            svg_bytes = fig_to_svg_bytes(fig)
-                            st.download_button(
-                                "Download SVG",
-                                data=svg_bytes,
-                                file_name=f"homer_plot_{st.session_state.plot_counter}.svg",
-                                mime="image/svg+xml",
-                            )
-                        except Exception:
-                            st.info("Install kaleido for SVG export: pip install kaleido")
-
-                    with dl_col3:
-                        add_to_report = st.button(
-                            "Add to Report",
-                            key=f"add_report_{st.session_state.plot_counter}",
-                        )
-                        if add_to_report:
-                            report_title = title if title else f"{plot_type}: {y_col or x_col}"
-                            st.session_state.report_figures.append({
-                                "title": report_title,
-                                "fig": fig,
-                            })
-                            st.success(f"Added to report ({len(st.session_state.report_figures)} figures)")
+                    _render_download_buttons(fig, title, plot_type, x_col, y_col)
 
             except Exception as e:
                 st.error(f"Error generating plot: {e}")
 
 
+def _render_download_buttons(fig, title, plot_type, x_col, y_col):
+    """Render download and report buttons for a figure."""
+    dl_col1, dl_col2, dl_col3 = st.columns(3)
+    with dl_col1:
+        try:
+            png_bytes = fig_to_png_bytes(fig)
+            st.download_button("Download PNG", data=png_bytes,
+                               file_name=f"homer_plot_{st.session_state.plot_counter}.png",
+                               mime="image/png")
+        except Exception:
+            st.info("Install kaleido for PNG export: pip install kaleido")
+
+    with dl_col2:
+        try:
+            svg_bytes = fig_to_svg_bytes(fig)
+            st.download_button("Download SVG", data=svg_bytes,
+                               file_name=f"homer_plot_{st.session_state.plot_counter}.svg",
+                               mime="image/svg+xml")
+        except Exception:
+            st.info("Install kaleido for SVG export: pip install kaleido")
+
+    with dl_col3:
+        if st.button("Add to Report", key=f"add_report_{st.session_state.plot_counter}"):
+            report_title = title if title else f"{plot_type}: {y_col or x_col}"
+            st.session_state.report_figures.append({"title": report_title, "fig": fig})
+            st.success(f"Added to report ({len(st.session_state.report_figures)} figures)")
+
+
+# ── Data Processing Tab ─────────────────────────────────────────────────────
+
+def render_data_processing(dataset: HaloDataset, filtered_df: pd.DataFrame):
+    """Render data processing tools (dezero, outlier removal)."""
+    st.markdown("### Data Processing")
+    st.caption("Tools for cleaning data, mirroring the anima HaloMunger and ClusterCleaner workflows.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### De-zero Rows")
+        st.caption("Remove rows where a metric equals zero (noise clusters).")
+        dezero_metric = st.selectbox("Metric to de-zero", dataset.numeric_columns, key="dezero_metric")
+        if st.button("Apply De-zero", key="dezero_btn"):
+            before_count = len(filtered_df)
+            cleaned = dezero(filtered_df, dezero_metric)
+            removed = before_count - len(cleaned)
+            st.session_state.dataset = parse_halo_data(cleaned, dataset.filename, force_type=dataset.data_type)
+            st.success(f"Removed {removed} zero-valued rows. {len(cleaned)} rows remaining.")
+            st.rerun()
+
+    with col2:
+        st.markdown("#### Outlier Removal")
+        outlier_metric = st.selectbox("Metric", dataset.numeric_columns, key="outlier_metric")
+        outlier_method = st.selectbox("Method", ["iqr", "percentile", "std", "winsorize"], key="outlier_method")
+
+        # Method-specific parameters
+        factor = 1.5
+        lower_pct = 1.0
+        upper_pct = 99.0
+        std_factor = 2.0
+        limits = (0.01, 0.01)
+
+        if outlier_method == "iqr":
+            factor = st.slider("IQR Factor", 0.5, 5.0, 1.5, 0.1, key="iqr_factor")
+        elif outlier_method == "percentile":
+            lower_pct = st.slider("Lower Percentile", 0.0, 25.0, 1.0, 0.5, key="lower_pct")
+            upper_pct = st.slider("Upper Percentile", 75.0, 100.0, 99.0, 0.5, key="upper_pct")
+        elif outlier_method == "std":
+            std_factor = st.slider("Std Factor", 0.5, 5.0, 2.0, 0.1, key="std_factor")
+        elif outlier_method == "winsorize":
+            lim_lower = st.slider("Lower Limit", 0.0, 0.2, 0.01, 0.005, key="win_lower")
+            lim_upper = st.slider("Upper Limit", 0.0, 0.2, 0.01, 0.005, key="win_upper")
+            limits = (lim_lower, lim_upper)
+
+        preview_btn = st.button("Preview Outlier Removal", key="outlier_preview")
+        apply_btn = st.button("Apply Outlier Removal", type="primary", key="outlier_apply")
+
+    if preview_btn or apply_btn:
+        cleaned, removed, lower, upper = remove_outliers(
+            filtered_df, outlier_metric, method=outlier_method,
+            factor=factor, lower_pct=lower_pct, upper_pct=upper_pct,
+            std_factor=std_factor, limits=limits,
+        )
+
+        fig = create_outlier_comparison(
+            filtered_df, cleaned, outlier_metric,
+            lower, upper, len(removed), method=outlier_method.upper(),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.info(f"Lower bound: {lower:.4f} | Upper bound: {upper:.4f} | Removed: {len(removed)} rows")
+
+        if apply_btn:
+            st.session_state.dataset = parse_halo_data(cleaned, dataset.filename, force_type=dataset.data_type)
+            st.success(f"Applied {outlier_method} outlier removal. {len(cleaned)} rows remaining.")
+            st.rerun()
+
+
 # ── Data Table ───────────────────────────────────────────────────────────────
 
 def render_data_table(filtered_df: pd.DataFrame):
-    """Render an interactive data table."""
     st.markdown("### Data Table")
 
     col1, col2, col3 = st.columns([1, 1, 1])
@@ -433,10 +525,8 @@ def render_data_table(filtered_df: pd.DataFrame):
         search_term = st.text_input("Search in data", "", key="search_term")
     with col3:
         selected_cols = st.multiselect(
-            "Select columns",
-            options=filtered_df.columns.tolist(),
-            default=filtered_df.columns.tolist()[:10],
-            key="table_cols",
+            "Select columns", options=filtered_df.columns.tolist(),
+            default=filtered_df.columns.tolist()[:10], key="table_cols",
         )
 
     display_df = filtered_df[selected_cols] if selected_cols else filtered_df
@@ -449,20 +539,14 @@ def render_data_table(filtered_df: pd.DataFrame):
 
     st.dataframe(display_df.head(max_rows), use_container_width=True, height=400)
 
-    # Download table
     csv_data = display_df.to_csv(index=False).encode()
-    st.download_button(
-        "Download Filtered Data (CSV)",
-        data=csv_data,
-        file_name="homer_filtered_data.csv",
-        mime="text/csv",
-    )
+    st.download_button("Download Filtered Data (CSV)", data=csv_data,
+                       file_name="homer_filtered_data.csv", mime="text/csv")
 
 
 # ── Summary Statistics ───────────────────────────────────────────────────────
 
 def render_summary_stats(dataset: HaloDataset, filtered_df: pd.DataFrame):
-    """Render summary statistics cards."""
     st.markdown("### Summary Statistics")
 
     metric_cols = st.columns(4)
@@ -475,11 +559,36 @@ def render_summary_stats(dataset: HaloDataset, filtered_df: pd.DataFrame):
     with metric_cols[3]:
         st.metric("Categorical Columns", len(dataset.categorical_columns))
 
+    # HALO-specific info
+    info_cols = st.columns(3)
+    with info_cols[0]:
+        if dataset.algorithm_names:
+            st.markdown("**Algorithms:**")
+            for a in dataset.algorithm_names:
+                st.write(f"- {a}")
+    with info_cols[1]:
+        if dataset.sample_ids:
+            st.markdown(f"**Samples ({len(dataset.sample_ids)}):**")
+            for s in dataset.sample_ids[:10]:
+                st.write(f"- {s}")
+            if len(dataset.sample_ids) > 10:
+                st.caption(f"... and {len(dataset.sample_ids) - 10} more")
+    with info_cols[2]:
+        if dataset.analysis_regions:
+            st.markdown("**Analysis Regions:**")
+            for r in dataset.analysis_regions:
+                st.write(f"- {r}")
+
+    # Column groups
     if dataset.marker_columns:
-        st.markdown("#### Marker Columns Detected")
+        st.markdown("#### Marker Columns")
         st.write(", ".join(dataset.marker_columns[:20]))
 
-    # Descriptive stats
+    if dataset.phenotype_fraction_columns:
+        st.markdown("#### Phenotype Fraction Columns (for broad_describe)")
+        clean_pheno = get_phenotype_columns(dataset, include_weak_strong=False)
+        st.write(", ".join(clean_pheno[:15]))
+
     with st.expander("Descriptive Statistics", expanded=False):
         st.dataframe(filtered_df.describe(), use_container_width=True)
 
@@ -487,11 +596,10 @@ def render_summary_stats(dataset: HaloDataset, filtered_df: pd.DataFrame):
 # ── Report Download ──────────────────────────────────────────────────────────
 
 def render_report_section(dataset: HaloDataset, filtered_df: pd.DataFrame):
-    """Render the report generation section."""
     st.markdown("### Report Generation")
 
     n_figs = len(st.session_state.report_figures)
-    st.info(f"Report contains {n_figs} figure(s). Add figures using the 'Add to Report' button in the Plot Builder.")
+    st.info(f"Report contains {n_figs} figure(s). Add figures via 'Add to Report' in Plot Builder.")
 
     col1, col2, col3 = st.columns(3)
 
@@ -507,13 +615,9 @@ def render_report_section(dataset: HaloDataset, filtered_df: pd.DataFrame):
                         builder.add_figure(entry["title"], entry["fig"])
                     pdf_bytes = builder.generate_pdf()
 
-                st.download_button(
-                    "Download PDF Report",
-                    data=pdf_bytes,
-                    file_name="homer_report.pdf",
-                    mime="application/pdf",
-                    key="download_pdf",
-                )
+                st.download_button("Download PDF Report", data=pdf_bytes,
+                                   file_name="homer_report.pdf", mime="application/pdf",
+                                   key="download_pdf")
             except Exception as e:
                 st.error(f"Error generating report: {e}")
 
@@ -521,6 +625,11 @@ def render_report_section(dataset: HaloDataset, filtered_df: pd.DataFrame):
         if st.button("Clear Report Figures"):
             st.session_state.report_figures = []
             st.rerun()
+
+    if st.session_state.report_figures:
+        st.markdown("**Figures in report:**")
+        for i, entry in enumerate(st.session_state.report_figures):
+            st.write(f"{i+1}. {entry['title']}")
 
 
 # ── Main App ─────────────────────────────────────────────────────────────────
@@ -536,43 +645,44 @@ def main():
         ### Getting Started
 
         1. **Upload** a HALO data file (CSV, TSV, or Excel) using the sidebar
-        2. Or click **Object Demo** / **Summary Demo** to explore with sample data
+        2. Or click **Object** / **Summary** / **Cluster** demo buttons
         3. Use **filters** in the sidebar to subset your data
-        4. Build **interactive plots** with the Plot Builder
-        5. **Download** individual figures (PNG/SVG) or a full PDF report
+        4. Use **Data Processing** to clean data (de-zero, outlier removal)
+        5. Build **interactive plots** with the Plot Builder
+        6. **Download** individual figures (PNG/SVG) or a full PDF report
 
         #### Supported HALO Data Types
-        - **Object Data**: Cell-by-cell measurements (Cell ID, coordinates, marker intensities, phenotypes)
-        - **Summary Data**: Aggregate statistics (total cells, percentages, densities, H-scores)
+        - **Summary Data**: HALO analysis output (Algorithm Name, Job Id, Image Tag, cell counts, %, H-Scores)
+        - **Object Data**: Cell-by-cell exports (Cell ID, coordinates, marker intensities, phenotypes)
+        - **Cluster Data**: Aggregated object data (Total Cluster Count, Region Area, cell fractions)
+
+        #### Column Classification (anima-compatible)
+        Homer auto-detects and classifies columns following the same logic as `HaloAnalysis.set_analysis_metrics()`:
+        - **Intensity**: H-Score, Intensity columns
+        - **Cell/Total/Fraction**: Columns with "Cells", split by "%" presence
+        - **Phenotype vs Channel**: Split by Spectrum/Cy5 presence
+        - **Spatial/Coordinate/Area**: Non-cell numeric metrics
 
         #### Available Plot Types
-        - Bar Charts (grouped, stacked, horizontal/vertical)
-        - Scatter Plots (with optional trendlines)
-        - Box Plots & Violin Plots
-        - Histograms
-        - XY Line Plots
-        - Heatmaps
+        Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatmap, Pairplot Matrix, Sample Overview
         """)
         display_footer()
         return
 
-    # Apply filters
     filtered_df = apply_filters(dataset.df, st.session_state.filters)
 
-    # Tabs
-    tab_plots, tab_table, tab_stats, tab_report = st.tabs([
-        "Plot Builder", "Data Table", "Summary Statistics", "Report",
+    tab_plots, tab_process, tab_table, tab_stats, tab_report = st.tabs([
+        "Plot Builder", "Data Processing", "Data Table", "Summary Statistics", "Report",
     ])
 
     with tab_plots:
         render_plot_builder(dataset, filtered_df)
-
+    with tab_process:
+        render_data_processing(dataset, filtered_df)
     with tab_table:
         render_data_table(filtered_df)
-
     with tab_stats:
         render_summary_stats(dataset, filtered_df)
-
     with tab_report:
         render_report_section(dataset, filtered_df)
 
