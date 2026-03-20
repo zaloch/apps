@@ -702,4 +702,10 @@ def index():
         ui.label("Homer v1.0 | HALO Data Dashboard | Built with NiceGUI").classes("text-sm")
 
 
-ui.run(title="Homer - Halo Data Dashboard", port=8080, reload=False)
+ui.run(
+    title="Homer - Halo Data Dashboard",
+    port=int(os.environ.get("PORT", 8080)),
+    host=os.environ.get("HOST", "0.0.0.0"),
+    reload=os.environ.get("HOMER_DEV", "").lower() in ("1", "true"),
+    storage_secret=os.environ.get("STORAGE_SECRET", "homer-halo-dashboard"),
+)
