@@ -17,8 +17,8 @@ from io import BytesIO
 from homer_core.data_parser import (
     load_uploaded_file, parse_halo_data, apply_filters,
     get_filterable_columns, get_plottable_numeric_columns, get_grouping_columns,
-    get_phenotype_columns, dezero, remove_outliers,
-    HaloDataset,
+    get_phenotype_columns, dezero, remove_outliers, sample_for_plotting,
+    get_memory_usage_mb, HaloDataset, MAX_INTERACTIVE_ROWS,
 )
 from homer_core.plotting import (
     create_bar_chart, create_stacked_bar_chart, create_scatter_plot,
@@ -182,7 +182,14 @@ def render_sidebar():
 
     if uploaded_file is not None:
         try:
-            df = load_uploaded_file(uploaded_file, uploaded_file.name)
+            file_size_mb = uploaded_file.size / (1024 * 1024) if hasattr(uploaded_file, 'size') else 0.0
+            if file_size_mb > 50:
+                st.sidebar.info(f"Large file detected ({file_size_mb:.0f} MB). Loading with memory optimization...")
+
+            df, total_rows = load_uploaded_file(
+                uploaded_file, uploaded_file.name,
+                file_size_mb=file_size_mb,
+            )
             ft = None
             if "Object" in force_type:
                 ft = "object"
@@ -192,10 +199,19 @@ def render_sidebar():
                 ft = "cluster"
 
             area = analysis_area if analysis_area else None
-            dataset = parse_halo_data(df, uploaded_file.name, force_type=ft,
-                                      max_job=max_job, analysis_area=area)
+            dataset = parse_halo_data(
+                df, uploaded_file.name, force_type=ft,
+                max_job=max_job, analysis_area=area,
+                file_size_mb=file_size_mb, total_rows=total_rows,
+            )
             st.session_state.dataset = dataset
             st.session_state.filters = {}
+
+            if dataset.is_sampled:
+                st.sidebar.warning(
+                    f"File has {total_rows:,} rows. Loaded {len(df):,} rows "
+                    f"({MAX_INTERACTIVE_ROWS:,} max) for interactive analysis."
+                )
         except Exception as e:
             st.sidebar.error(f"Error loading file: {e}")
 
@@ -226,9 +242,19 @@ def render_sidebar():
             unsafe_allow_html=True,
         )
         st.sidebar.markdown(f"**File:** {dataset.filename}")
+        if dataset.file_size_mb > 0:
+            st.sidebar.markdown(f"**File Size:** {dataset.file_size_mb:.1f} MB")
         filtered_df = apply_filters(dataset.df, st.session_state.filters)
-        st.sidebar.markdown(f"**Rows:** {len(filtered_df):,} / {len(dataset.df):,}")
+        if dataset.is_sampled:
+            st.sidebar.markdown(
+                f"**Rows:** {len(filtered_df):,} / {len(dataset.df):,} "
+                f"(sampled from {dataset.total_rows:,})"
+            )
+        else:
+            st.sidebar.markdown(f"**Rows:** {len(filtered_df):,} / {len(dataset.df):,}")
         st.sidebar.markdown(f"**Columns:** {len(dataset.df.columns)}")
+        mem_mb = get_memory_usage_mb(dataset.df)
+        st.sidebar.markdown(f"**Memory:** {mem_mb:.1f} MB")
 
         if dataset.algorithm_names:
             st.sidebar.markdown(f"**Algorithms:** {', '.join(str(a) for a in dataset.algorithm_names)}")
@@ -368,6 +394,14 @@ def render_plot_builder(dataset: HaloDataset, filtered_df: pd.DataFrame):
 
             try:
                 plot_df = filtered_df.copy()
+
+                # Downsample for plotting if dataset is large
+                if len(plot_df) > 50_000 and plot_type in (
+                    "Scatter Plot", "Strip Plot", "Swarm Plot", "Pairplot Matrix",
+                ):
+                    plot_df = sample_for_plotting(plot_df, max_points=50_000,
+                                                   stratify_col=color_col)
+                    st.caption(f"Showing {len(plot_df):,} sampled points for performance.")
                 fig = None
 
                 # Aggregate for bar charts
@@ -558,15 +592,22 @@ def render_data_table(filtered_df: pd.DataFrame):
 def render_summary_stats(dataset: HaloDataset, filtered_df: pd.DataFrame):
     st.markdown("### Summary Statistics")
 
-    metric_cols = st.columns(4)
+    metric_cols = st.columns(5)
     with metric_cols[0]:
-        st.metric("Total Rows", f"{len(filtered_df):,}")
+        if dataset.is_sampled:
+            st.metric("Loaded Rows", f"{len(filtered_df):,}",
+                       delta=f"of {dataset.total_rows:,} total", delta_color="off")
+        else:
+            st.metric("Total Rows", f"{len(filtered_df):,}")
     with metric_cols[1]:
         st.metric("Data Type", dataset.data_type.title())
     with metric_cols[2]:
         st.metric("Numeric Columns", len(dataset.numeric_columns))
     with metric_cols[3]:
         st.metric("Categorical Columns", len(dataset.categorical_columns))
+    with metric_cols[4]:
+        mem = get_memory_usage_mb(dataset.df)
+        st.metric("Memory", f"{mem:.1f} MB")
 
     # HALO-specific info
     info_cols = st.columns(3)

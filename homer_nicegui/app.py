@@ -20,8 +20,8 @@ import tempfile
 from homer_core.data_parser import (
     load_uploaded_file, load_file, parse_halo_data, apply_filters,
     get_filterable_columns, get_plottable_numeric_columns, get_grouping_columns,
-    get_phenotype_columns, dezero, remove_outliers,
-    HaloDataset,
+    get_phenotype_columns, dezero, remove_outliers, sample_for_plotting,
+    get_memory_usage_mb, HaloDataset, MAX_INTERACTIVE_ROWS,
 )
 from homer_core.plotting import (
     create_bar_chart, create_stacked_bar_chart, create_scatter_plot,
@@ -99,12 +99,17 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
     try:
         content = e.content.read()
         filename = e.name
+        file_size_mb = len(content) / (1024 * 1024)
         suffix = os.path.splitext(filename)[1]
+
+        if file_size_mb > 50:
+            ui.notify(f"Large file ({file_size_mb:.0f} MB). Loading with memory optimization...", type="info")
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
 
-        df = load_file(tmp_path)
+        df, actual_file_size_mb, total_rows = load_file(tmp_path)
         os.unlink(tmp_path)
 
         ft = None
@@ -116,9 +121,16 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
         elif "Cluster" in force_val:
             ft = "cluster"
 
-        state.dataset = parse_halo_data(df, filename, force_type=ft, max_job=max_job_cb.value)
+        state.dataset = parse_halo_data(
+            df, filename, force_type=ft, max_job=max_job_cb.value,
+            file_size_mb=actual_file_size_mb, total_rows=total_rows,
+        )
         state.filters = {}
-        ui.notify(f"Loaded {filename}: {len(df):,} rows, {len(df.columns)} columns", type="positive")
+
+        msg = f"Loaded {filename}: {len(df):,} rows, {len(df.columns)} columns"
+        if state.dataset.is_sampled:
+            msg += f" (sampled from {total_rows:,} total rows)"
+        ui.notify(msg, type="positive")
         main_content.refresh()
         sidebar_info.refresh()
     except Exception as ex:
@@ -219,6 +231,13 @@ def generate_plot(
     plot_df = filtered_df.copy()
     color = color_col if color_col and color_col != "(None)" else None
 
+    # Downsample for performance on point-heavy plot types
+    if len(plot_df) > 50_000 and plot_type in (
+        "Scatter Plot", "Strip Plot", "Swarm Plot", "Pairplot Matrix",
+    ):
+        plot_df = sample_for_plotting(plot_df, max_points=50_000, stratify_col=color)
+        ui.notify(f"Showing {len(plot_df):,} sampled points for performance", type="info")
+
     try:
         if plot_type in ("Bar Chart", "Stacked Bar Chart") and y_col and x_col:
             group_cols = [x_col]
@@ -297,10 +316,17 @@ def sidebar_info():
     badge_class = badge_map.get(ds.data_type, "badge-summary")
     ui.html(f'<span class="data-badge {badge_class}">{ds.data_type.upper()} DATA</span>')
     ui.label(f"File: {ds.filename}").classes("text-sm text-gray-600")
+    if ds.file_size_mb > 0:
+        ui.label(f"File Size: {ds.file_size_mb:.1f} MB").classes("text-sm text-gray-500")
 
     filtered_df = apply_filters(ds.df, state.filters)
-    ui.label(f"Rows: {len(filtered_df):,} / {len(ds.df):,}").classes("text-sm")
+    if ds.is_sampled:
+        ui.label(f"Rows: {len(filtered_df):,} / {len(ds.df):,} (of {ds.total_rows:,})").classes("text-sm")
+    else:
+        ui.label(f"Rows: {len(filtered_df):,} / {len(ds.df):,}").classes("text-sm")
     ui.label(f"Columns: {len(ds.df.columns)}").classes("text-sm")
+    mem_mb = get_memory_usage_mb(ds.df)
+    ui.label(f"Memory: {mem_mb:.1f} MB").classes("text-sm text-gray-500")
 
     if ds.algorithm_names:
         ui.label(f"Algorithms: {len(ds.algorithm_names)}").classes("text-sm")
@@ -380,12 +406,19 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
     phenotype_cols = get_phenotype_columns(ds)
 
     # Metrics row
+    row_label = "Total Rows"
+    row_value = f"{len(filtered_df):,}"
+    if ds.is_sampled:
+        row_label = "Loaded Rows"
+        row_value = f"{len(filtered_df):,} of {ds.total_rows:,}"
+
     with ui.row().classes("w-full gap-4 mb-4"):
         for label, value in [
-            ("Total Rows", f"{len(filtered_df):,}"),
+            (row_label, row_value),
             ("Data Type", ds.data_type.title()),
             ("Numeric Cols", str(len(ds.numeric_columns))),
             ("Samples", str(len(ds.sample_ids)) if ds.sample_ids else "N/A"),
+            ("Memory", f"{get_memory_usage_mb(ds.df):.1f} MB"),
         ]:
             with ui.card().classes("flex-1"):
                 ui.html(f'<div class="metric-card"><div class="value">{value}</div><div class="label">{label}</div></div>')

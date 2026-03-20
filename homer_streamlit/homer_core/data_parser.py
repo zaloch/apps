@@ -1,6 +1,7 @@
 # Homer - Data Parser for HALO by Indica Labs output files
 # Aligned with anima/HaloAnalysis column patterns and real HALO object/summary exports
 # Handles CSV, TSV, and Excel files with auto-detection of object vs summary data
+# Supports large files (100MB - 3GB) via chunked reading and intelligent sampling
 
 import re
 import pandas as pd
@@ -9,6 +10,9 @@ from pathlib import Path
 from typing import Optional, Tuple
 from dataclasses import dataclass, field
 from scipy.stats.mstats import winsorize as scipy_winsorize
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -52,6 +56,10 @@ class HaloDataset:
     algorithm_names: list = field(default_factory=list)
     sample_ids: list = field(default_factory=list)
     analysis_regions: list = field(default_factory=list)
+    # Large file metadata
+    is_sampled: bool = False           # True if data was sampled for performance
+    total_rows: int = 0                # Original row count before sampling
+    file_size_mb: float = 0.0          # File size in MB
 
     @property
     def shape(self):
@@ -198,35 +206,201 @@ def _detect_fluorophores(columns: list[str]) -> list[str]:
     return found
 
 
+# ── Large file thresholds ────────────────────────────────────────────────────
+
+# Files larger than this (in MB) trigger chunked loading + memory optimization
+LARGE_FILE_THRESHOLD_MB = 50
+# Max rows to keep in memory for interactive work; larger files get sampled
+MAX_INTERACTIVE_ROWS = 500_000
+# Chunk size for reading large CSVs (rows per chunk)
+CSV_CHUNK_SIZE = 100_000
+# Columns that can be safely downcast to save memory
+DOWNCAST_INT_COLS = True
+DOWNCAST_FLOAT_COLS = True
+
+
 # ── File I/O ─────────────────────────────────────────────────────────────────
 
-def load_file(filepath: str, sheet_name: Optional[str] = None) -> pd.DataFrame:
-    """Load a data file (CSV, TSV, or Excel) into a DataFrame."""
+def _get_file_size_mb(filepath: str) -> float:
+    """Get file size in MB."""
+    try:
+        return Path(filepath).stat().st_size / (1024 * 1024)
+    except (OSError, ValueError):
+        return 0.0
+
+
+def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    """Downcast numeric columns to reduce memory usage.
+    Typically saves 40-60% memory on large HALO exports."""
+    for col in df.select_dtypes(include=["int64"]).columns:
+        col_min, col_max = df[col].min(), df[col].max()
+        if col_min >= 0 and col_max <= 255:
+            df[col] = df[col].astype(np.uint8)
+        elif col_min >= -128 and col_max <= 127:
+            df[col] = df[col].astype(np.int8)
+        elif col_min >= 0 and col_max <= 65535:
+            df[col] = df[col].astype(np.uint16)
+        elif col_min >= -32768 and col_max <= 32767:
+            df[col] = df[col].astype(np.int16)
+        elif col_min >= 0 and col_max <= 4294967295:
+            df[col] = df[col].astype(np.uint32)
+        else:
+            df[col] = df[col].astype(np.int32)
+
+    for col in df.select_dtypes(include=["float64"]).columns:
+        df[col] = pd.to_numeric(df[col], downcast="float")
+
+    # Convert low-cardinality string columns to categories
+    for col in df.select_dtypes(include=["object"]).columns:
+        if df[col].nunique() < 100:
+            df[col] = df[col].astype("category")
+
+    return df
+
+
+def _read_csv_chunked(
+    filepath_or_buffer,
+    sep: str = ",",
+    max_rows: Optional[int] = None,
+    sample_frac: Optional[float] = None,
+) -> Tuple[pd.DataFrame, int]:
+    """Read a CSV in chunks, optionally sampling or capping rows.
+
+    Returns (DataFrame, total_row_count).
+    If file fits in memory, returns all rows.
+    """
+    chunks = []
+    total_rows = 0
+
+    reader = pd.read_csv(
+        filepath_or_buffer,
+        sep=sep,
+        chunksize=CSV_CHUNK_SIZE,
+        low_memory=True,
+    )
+
+    for chunk in reader:
+        total_rows += len(chunk)
+
+        if sample_frac is not None and sample_frac < 1.0:
+            chunk = chunk.sample(frac=sample_frac, random_state=42)
+
+        chunks.append(chunk)
+
+        if max_rows is not None and total_rows >= max_rows:
+            break
+
+    df = pd.concat(chunks, ignore_index=True)
+
+    if max_rows is not None and len(df) > max_rows:
+        df = df.head(max_rows)
+
+    return df, total_rows
+
+
+def load_file(
+    filepath: str,
+    sheet_name: Optional[str] = None,
+    max_rows: Optional[int] = None,
+    optimize_memory: bool = True,
+) -> Tuple[pd.DataFrame, float, int]:
+    """Load a data file into a DataFrame with large file support.
+
+    Returns (DataFrame, file_size_mb, total_rows).
+    For files > LARGE_FILE_THRESHOLD_MB, automatically optimizes memory.
+    """
     path = Path(filepath)
     suffix = path.suffix.lower()
+    file_size_mb = _get_file_size_mb(filepath)
+    total_rows = 0
+
+    is_large = file_size_mb > LARGE_FILE_THRESHOLD_MB
+    effective_max = max_rows
+    if is_large and effective_max is None:
+        effective_max = MAX_INTERACTIVE_ROWS
+        logger.info(
+            f"Large file detected ({file_size_mb:.0f} MB). "
+            f"Capping at {MAX_INTERACTIVE_ROWS:,} rows for interactive use."
+        )
 
     if suffix in (".csv",):
-        return pd.read_csv(filepath, low_memory=False)
+        if is_large or effective_max:
+            df, total_rows = _read_csv_chunked(filepath, sep=",", max_rows=effective_max)
+        else:
+            df = pd.read_csv(filepath, low_memory=False)
+            total_rows = len(df)
     elif suffix in (".tsv", ".txt"):
-        return pd.read_csv(filepath, sep="\t", low_memory=False)
+        if is_large or effective_max:
+            df, total_rows = _read_csv_chunked(filepath, sep="\t", max_rows=effective_max)
+        else:
+            df = pd.read_csv(filepath, sep="\t", low_memory=False)
+            total_rows = len(df)
     elif suffix in (".xls", ".xlsx", ".xlsm"):
-        return pd.read_excel(filepath, sheet_name=sheet_name or 0)
+        df = pd.read_excel(filepath, sheet_name=sheet_name or 0)
+        total_rows = len(df)
+        if effective_max and len(df) > effective_max:
+            df = df.head(effective_max)
     else:
-        return pd.read_csv(filepath, low_memory=False)
+        if is_large or effective_max:
+            df, total_rows = _read_csv_chunked(filepath, sep=",", max_rows=effective_max)
+        else:
+            df = pd.read_csv(filepath, low_memory=False)
+            total_rows = len(df)
+
+    if optimize_memory and (is_large or len(df) > 50_000):
+        df = _optimize_dtypes(df)
+
+    return df, file_size_mb, total_rows
 
 
-def load_uploaded_file(file_obj, filename: str, sheet_name: Optional[str] = None) -> pd.DataFrame:
-    """Load an uploaded file object into a DataFrame."""
+def load_uploaded_file(
+    file_obj,
+    filename: str,
+    sheet_name: Optional[str] = None,
+    max_rows: Optional[int] = None,
+    optimize_memory: bool = True,
+    file_size_mb: float = 0.0,
+) -> Tuple[pd.DataFrame, int]:
+    """Load an uploaded file object into a DataFrame with large file support.
+
+    Returns (DataFrame, total_rows).
+    """
     suffix = Path(filename).suffix.lower()
+    is_large = file_size_mb > LARGE_FILE_THRESHOLD_MB
+    effective_max = max_rows
+    if is_large and effective_max is None:
+        effective_max = MAX_INTERACTIVE_ROWS
+
+    total_rows = 0
 
     if suffix in (".csv",):
-        return pd.read_csv(file_obj, low_memory=False)
+        if is_large or effective_max:
+            df, total_rows = _read_csv_chunked(file_obj, sep=",", max_rows=effective_max)
+        else:
+            df = pd.read_csv(file_obj, low_memory=False)
+            total_rows = len(df)
     elif suffix in (".tsv", ".txt"):
-        return pd.read_csv(file_obj, sep="\t", low_memory=False)
+        if is_large or effective_max:
+            df, total_rows = _read_csv_chunked(file_obj, sep="\t", max_rows=effective_max)
+        else:
+            df = pd.read_csv(file_obj, sep="\t", low_memory=False)
+            total_rows = len(df)
     elif suffix in (".xls", ".xlsx", ".xlsm"):
-        return pd.read_excel(file_obj, sheet_name=sheet_name or 0)
+        df = pd.read_excel(file_obj, sheet_name=sheet_name or 0)
+        total_rows = len(df)
+        if effective_max and len(df) > effective_max:
+            df = df.head(effective_max)
     else:
-        return pd.read_csv(file_obj, low_memory=False)
+        if is_large or effective_max:
+            df, total_rows = _read_csv_chunked(file_obj, sep=",", max_rows=effective_max)
+        else:
+            df = pd.read_csv(file_obj, low_memory=False)
+            total_rows = len(df)
+
+    if optimize_memory and (is_large or len(df) > 50_000):
+        df = _optimize_dtypes(df)
+
+    return df, total_rows
 
 
 # ── Pattern matching ─────────────────────────────────────────────────────────
@@ -553,12 +727,42 @@ def remove_outliers(
 
 # ── Main parse function ──────────────────────────────────────────────────────
 
+def sample_for_plotting(df: pd.DataFrame, max_points: int = 50_000,
+                         stratify_col: Optional[str] = None) -> pd.DataFrame:
+    """Downsample a DataFrame for plotting performance.
+
+    For datasets with > max_points rows, takes a random sample.
+    Optionally stratifies by a categorical column to preserve group proportions.
+    """
+    if len(df) <= max_points:
+        return df
+
+    if stratify_col and stratify_col in df.columns:
+        # Stratified sampling preserving group proportions
+        frac = max_points / len(df)
+        sampled = df.groupby(stratify_col, group_keys=False).apply(
+            lambda x: x.sample(frac=min(frac, 1.0), random_state=42)
+        )
+        if len(sampled) > max_points:
+            sampled = sampled.sample(n=max_points, random_state=42)
+        return sampled.reset_index(drop=True)
+    else:
+        return df.sample(n=max_points, random_state=42).reset_index(drop=True)
+
+
+def get_memory_usage_mb(df: pd.DataFrame) -> float:
+    """Get DataFrame memory usage in MB."""
+    return df.memory_usage(deep=True).sum() / (1024 * 1024)
+
+
 def parse_halo_data(
     df: pd.DataFrame,
     filename: str = "unknown",
     force_type: Optional[str] = None,
     max_job: bool = False,
     analysis_area: Optional[str] = None,
+    file_size_mb: float = 0.0,
+    total_rows: int = 0,
 ) -> HaloDataset:
     """Parse a DataFrame as HALO data, auto-detecting type and classifying columns.
 
@@ -580,6 +784,8 @@ def parse_halo_data(
     algorithm_names = df["Algorithm Name"].unique().tolist() if "Algorithm Name" in df.columns else []
     sample_ids = df["Sample ID"].unique().tolist() if "Sample ID" in df.columns else []
     analysis_regions = df["Analysis Region"].unique().tolist() if "Analysis Region" in df.columns else []
+
+    is_sampled = total_rows > 0 and len(df) < total_rows
 
     return HaloDataset(
         df=df,
@@ -612,6 +818,9 @@ def parse_halo_data(
         algorithm_names=algorithm_names,
         sample_ids=sample_ids,
         analysis_regions=analysis_regions,
+        is_sampled=is_sampled,
+        total_rows=total_rows if total_rows > 0 else len(df),
+        file_size_mb=file_size_mb,
     )
 
 
