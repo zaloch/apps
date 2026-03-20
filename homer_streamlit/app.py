@@ -235,16 +235,25 @@ def render_sidebar():
         if dataset.sample_ids:
             st.sidebar.markdown(f"**Samples:** {len(dataset.sample_ids)}")
 
+        if dataset.fluorophore_channels:
+            st.sidebar.markdown(f"**Fluorophores:** {', '.join(dataset.fluorophore_channels)}")
+
         # Column classification summary
-        with st.sidebar.expander("Column Groups (anima-style)"):
+        with st.sidebar.expander("Column Groups"):
             groups = [
+                ("Phenotype Combos (DAPI+ C1+...)", dataset.phenotype_combo_columns),
+                ("Classification", dataset.classification_columns),
+                ("Nucleus Intensity", dataset.nucleus_intensity_columns),
+                ("Cell Intensity", dataset.cell_intensity_columns),
+                ("% Nucleus Completeness", dataset.completeness_columns),
+                ("Morphology", dataset.morphology_columns),
                 ("Intensity (H-Score/Intensity)", dataset.intensity_columns),
                 ("Cell Columns", dataset.cell_columns),
                 ("Total (counts)", dataset.total_columns),
                 ("Fraction (%)", dataset.fraction_columns),
                 ("Phenotype Totals", dataset.phenotype_total_columns),
                 ("Phenotype Fractions", dataset.phenotype_fraction_columns),
-                ("Channel Totals (Spectrum/Cy5)", dataset.channel_total_columns),
+                ("Channel Totals", dataset.channel_total_columns),
                 ("Channel Fractions", dataset.channel_fraction_columns),
                 ("Spatial", dataset.spatial_columns),
                 ("Coordinate", dataset.coordinate_columns),
