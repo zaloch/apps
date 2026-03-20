@@ -30,6 +30,12 @@ from homer_core.plotting import (
 )
 from homer_core.report_generator import ReportBuilder, generate_data_summary_page
 from homer_core.sample_data import generate_object_data, generate_summary_data, generate_cluster_data
+from homer_core.metadata import (
+    load_metadata_csv, merge_metadata, create_empty_metadata,
+    metadata_template_csv, calculate_per_image_percentages,
+    aggregate_object_data, generate_demo_metadata,
+    ExperimentMetadata, STANDARD_METADATA_FIELDS,
+)
 
 
 # ── Page Config ──────────────────────────────────────────────────────────────
@@ -111,6 +117,10 @@ if "report_figures" not in st.session_state:
     st.session_state.report_figures = []
 if "plot_counter" not in st.session_state:
     st.session_state.plot_counter = 0
+if "metadata" not in st.session_state:
+    st.session_state.metadata = None  # ExperimentMetadata or None
+if "aggregated_df" not in st.session_state:
+    st.session_state.aggregated_df = None  # per-image aggregated data
 
 
 # ── Header / Footer ─────────────────────────────────────────────────────────
@@ -682,6 +692,227 @@ def render_report_section(dataset: HaloDataset, filtered_df: pd.DataFrame):
             st.write(f"{i+1}. {entry['title']}")
 
 
+# ── Metadata Tab ──────────────────────────────────────────────────────────────
+
+def render_metadata_tab(dataset: HaloDataset, filtered_df: pd.DataFrame):
+    """Render metadata management: upload, manual entry, merge, and aggregation."""
+    st.markdown("### Experimental Metadata")
+    st.caption(
+        "Map each image/sample to experimental factors (Subject ID, Treatment, Genotype, "
+        "Timepoint, etc.) then aggregate and plot as a function of these factors."
+    )
+
+    meta_col1, meta_col2 = st.columns(2)
+
+    with meta_col1:
+        st.markdown("#### Upload Metadata CSV")
+        st.caption(
+            "CSV with one row per sample. Must include a `Sample ID` column "
+            "(matching your HALO data) plus any experimental factors."
+        )
+        meta_file = st.file_uploader(
+            "Upload metadata CSV",
+            type=["csv", "tsv", "xlsx"],
+            key="meta_upload",
+        )
+        if meta_file is not None:
+            try:
+                meta = load_metadata_csv(meta_file, filename=meta_file.name)
+                st.session_state.metadata = meta
+                st.success(
+                    f"Loaded metadata: {len(meta.df)} samples, "
+                    f"join key: **{meta.join_key}**, "
+                    f"factors: {', '.join(meta.factor_columns)}"
+                )
+            except Exception as e:
+                st.error(f"Error loading metadata: {e}")
+
+        # Demo metadata button
+        if dataset.sample_ids:
+            if st.button("Load Demo Metadata", key="demo_meta"):
+                demo_meta_df = generate_demo_metadata(dataset.sample_ids)
+                st.session_state.metadata = ExperimentMetadata(
+                    df=demo_meta_df,
+                    join_key="Sample ID",
+                    factor_columns=[c for c in demo_meta_df.columns if c != "Sample ID"],
+                    filename="demo_metadata.csv",
+                )
+                st.success("Loaded demo metadata with Treatment, Genotype, Timepoint, etc.")
+                st.rerun()
+
+        # Download template
+        if dataset.sample_ids:
+            template_csv = metadata_template_csv(dataset.sample_ids)
+            st.download_button(
+                "Download Metadata Template",
+                data=template_csv.encode(),
+                file_name="metadata_template.csv",
+                mime="text/csv",
+                key="dl_meta_template",
+            )
+
+    with meta_col2:
+        st.markdown("#### Manual Metadata Entry")
+        if dataset.sample_ids:
+            # If metadata exists, show editable table; otherwise create empty
+            if st.session_state.metadata is not None:
+                edit_df = st.session_state.metadata.df.copy()
+            else:
+                edit_df = create_empty_metadata(dataset.sample_ids)
+
+            edited = st.data_editor(
+                edit_df,
+                use_container_width=True,
+                num_rows="fixed",
+                height=300,
+                key="meta_editor",
+            )
+
+            if st.button("Apply Manual Metadata", key="apply_manual_meta"):
+                # Remove empty columns
+                non_empty = [c for c in edited.columns if not (edited[c] == "").all()]
+                cleaned = edited[non_empty]
+                meta = ExperimentMetadata(
+                    df=cleaned,
+                    join_key="Sample ID",
+                    factor_columns=[c for c in cleaned.columns if c != "Sample ID" and cleaned[c].nunique() > 1],
+                    filename="manual_entry",
+                )
+                st.session_state.metadata = meta
+                st.success(f"Applied metadata with factors: {', '.join(meta.factor_columns)}")
+                st.rerun()
+        else:
+            st.info("Load HALO data first to see sample IDs for metadata entry.")
+
+    # ── Show current metadata status and merge ──
+    st.markdown("---")
+
+    if st.session_state.metadata is not None:
+        meta = st.session_state.metadata
+
+        st.markdown("#### Current Metadata")
+        mcol1, mcol2, mcol3 = st.columns(3)
+        with mcol1:
+            st.metric("Samples in Metadata", len(meta.df))
+        with mcol2:
+            st.metric("Factor Columns", len(meta.factor_columns))
+        with mcol3:
+            matched = set(meta.df[meta.join_key].astype(str)) & set(
+                str(s) for s in dataset.sample_ids
+            )
+            st.metric("Matched Samples", f"{len(matched)} / {len(dataset.sample_ids)}")
+
+        with st.expander("Preview Metadata", expanded=False):
+            st.dataframe(meta.df, use_container_width=True, height=200)
+
+        st.markdown("#### Merge & Aggregate")
+
+        # Merge metadata into HALO data
+        if st.button("Merge Metadata into HALO Data", type="primary", key="merge_meta"):
+            try:
+                merged_df = merge_metadata(filtered_df, meta)
+                # Re-parse with merged data
+                new_dataset = parse_halo_data(
+                    merged_df, dataset.filename,
+                    force_type=dataset.data_type,
+                    file_size_mb=dataset.file_size_mb,
+                    total_rows=dataset.total_rows,
+                )
+                st.session_state.dataset = new_dataset
+                st.success(
+                    f"Merged! {len(meta.factor_columns)} metadata columns added. "
+                    f"You can now use {', '.join(meta.factor_columns)} as plot groupings."
+                )
+                st.rerun()
+            except Exception as e:
+                st.error(f"Merge failed: {e}")
+
+        # Object data aggregation
+        if dataset.data_type == "object":
+            st.markdown("---")
+            st.markdown("#### Aggregate Object Data to Per-Image Percentages")
+            st.caption(
+                "Convert per-cell binary data (0/1 classifications) into per-image "
+                "percentages, then plot by Treatment, Genotype, Subject ID, etc."
+            )
+
+            agg_group_options = []
+            if "Sample ID" in filtered_df.columns:
+                agg_group_options.append("Sample ID")
+            if "Analysis Region" in filtered_df.columns:
+                agg_group_options.append("Analysis Region")
+            # Add metadata factor columns if merged
+            for fc in meta.factor_columns:
+                if fc in filtered_df.columns and fc not in agg_group_options:
+                    agg_group_options.append(fc)
+
+            agg_groups = st.multiselect(
+                "Group by",
+                options=agg_group_options,
+                default=["Sample ID"] if "Sample ID" in agg_group_options else agg_group_options[:1],
+                key="agg_groups",
+            )
+
+            if st.button("Aggregate", type="primary", key="agg_btn") and agg_groups:
+                try:
+                    agg_df = aggregate_object_data(
+                        filtered_df,
+                        group_cols=agg_groups,
+                        classification_cols=dataset.classification_columns,
+                        phenotype_combo_cols=dataset.phenotype_combo_columns,
+                        intensity_cols=(dataset.nucleus_intensity_columns +
+                                        dataset.cell_intensity_columns),
+                        morphology_cols=dataset.morphology_columns,
+                    )
+                    st.session_state.aggregated_df = agg_df
+
+                    # Also parse as a new dataset for plotting
+                    agg_dataset = parse_halo_data(
+                        agg_df, f"{dataset.filename}_aggregated",
+                        force_type="summary",
+                        file_size_mb=0,
+                        total_rows=len(agg_df),
+                    )
+                    st.success(
+                        f"Aggregated {len(filtered_df):,} objects into "
+                        f"{len(agg_df):,} groups. "
+                        f"Switch to the aggregated view to plot by factors."
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Aggregation failed: {e}")
+
+            if st.session_state.aggregated_df is not None:
+                st.markdown("**Aggregated Data Preview:**")
+                agg_df = st.session_state.aggregated_df
+                # Show the % columns prominently
+                pct_cols = [c for c in agg_df.columns if c.startswith("% ")]
+                display_cols = agg_groups + ["Object Count"] + pct_cols
+                display_cols = [c for c in display_cols if c in agg_df.columns]
+                st.dataframe(agg_df[display_cols], use_container_width=True, height=300)
+
+                if st.button("Use Aggregated Data for Plotting", key="use_agg"):
+                    st.session_state.dataset = parse_halo_data(
+                        agg_df, f"{dataset.filename}_aggregated",
+                        force_type="summary",
+                    )
+                    st.session_state.filters = {}
+                    st.success("Switched to aggregated data. Use Plot Builder to visualize.")
+                    st.rerun()
+
+                csv_data = agg_df.to_csv(index=False).encode()
+                st.download_button(
+                    "Download Aggregated Data (CSV)",
+                    data=csv_data,
+                    file_name="homer_aggregated.csv",
+                    mime="text/csv",
+                    key="dl_agg_csv",
+                )
+
+    else:
+        st.info("Upload a metadata CSV or use manual entry to map samples to experimental factors.")
+
+
 # ── Main App ─────────────────────────────────────────────────────────────────
 
 def main():
@@ -696,22 +927,22 @@ def main():
 
         1. **Upload** a HALO data file (CSV, TSV, or Excel) using the sidebar
         2. Or click **Object** / **Summary** / **Cluster** demo buttons
-        3. Use **filters** in the sidebar to subset your data
-        4. Use **Data Processing** to clean data (de-zero, outlier removal)
-        5. Build **interactive plots** with the Plot Builder
+        3. Add **experimental metadata** (Treatment, Genotype, Subject ID, Timepoint)
+        4. **Merge** metadata and **aggregate** object data to per-image percentages
+        5. Build **interactive plots** grouped by experimental factors
         6. **Download** individual figures (PNG/SVG) or a full PDF report
 
         #### Supported HALO Data Types
-        - **Summary Data**: HALO analysis output (Algorithm Name, Job Id, Image Tag, cell counts, %, H-Scores)
-        - **Object Data**: Cell-by-cell exports (Cell ID, coordinates, marker intensities, phenotypes)
-        - **Cluster Data**: Aggregated object data (Total Cluster Count, Region Area, cell fractions)
+        - **Object Data**: Per-cell exports with classifications, intensities, phenotypes
+        - **Summary Data**: HALO analysis output (cell counts, fractions, H-Scores)
+        - **Cluster Data**: Aggregated object data
 
-        #### Column Classification (anima-compatible)
-        Homer auto-detects and classifies columns following the same logic as `HaloAnalysis.set_analysis_metrics()`:
-        - **Intensity**: H-Score, Intensity columns
-        - **Cell/Total/Fraction**: Columns with "Cells", split by "%" presence
-        - **Phenotype vs Channel**: Split by Spectrum/Cy5 presence
-        - **Spatial/Coordinate/Area**: Non-cell numeric metrics
+        #### Metadata Workflow
+        1. Upload your HALO data (object or summary)
+        2. Go to the **Metadata** tab to upload or manually enter experimental info
+        3. **Merge** metadata into your data to add Treatment, Genotype, etc. columns
+        4. For object data: **Aggregate** per-cell data into per-image percentages
+        5. Plot percentages as a function of Treatment, Subject ID, Genotype, Day, etc.
 
         #### Available Plot Types
         Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatmap, Pairplot Matrix, Sample Overview
@@ -721,12 +952,15 @@ def main():
 
     filtered_df = apply_filters(dataset.df, st.session_state.filters)
 
-    tab_plots, tab_process, tab_table, tab_stats, tab_report = st.tabs([
-        "Plot Builder", "Data Processing", "Data Table", "Summary Statistics", "Report",
+    tab_plots, tab_metadata, tab_process, tab_table, tab_stats, tab_report = st.tabs([
+        "Plot Builder", "Metadata & Aggregation", "Data Processing",
+        "Data Table", "Summary Statistics", "Report",
     ])
 
     with tab_plots:
         render_plot_builder(dataset, filtered_df)
+    with tab_metadata:
+        render_metadata_tab(dataset, filtered_df)
     with tab_process:
         render_data_processing(dataset, filtered_df)
     with tab_table:

@@ -33,6 +33,12 @@ from homer_core.plotting import (
 )
 from homer_core.report_generator import ReportBuilder, generate_data_summary_page
 from homer_core.sample_data import generate_object_data, generate_summary_data, generate_cluster_data
+from homer_core.metadata import (
+    load_metadata_csv, merge_metadata, create_empty_metadata,
+    metadata_template_csv, calculate_per_image_percentages,
+    aggregate_object_data, generate_demo_metadata,
+    ExperimentMetadata, STANDARD_METADATA_FIELDS,
+)
 
 
 # ── Application State ────────────────────────────────────────────────────────
@@ -44,6 +50,8 @@ class AppState:
         self.report_figures: list[dict] = []
         self.plot_counter: int = 0
         self.current_fig: go.Figure | None = None
+        self.metadata: ExperimentMetadata | None = None
+        self.aggregated_df: pd.DataFrame | None = None
 
 state = AppState()
 
@@ -425,6 +433,7 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
 
     with ui.tabs().classes("w-full") as tabs:
         plot_tab = ui.tab("Plot Builder")
+        metadata_tab = ui.tab("Metadata & Aggregation")
         process_tab = ui.tab("Data Processing")
         table_tab = ui.tab("Data Table")
         stats_tab = ui.tab("Statistics")
@@ -505,6 +514,210 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
                     plot_display = ui.column().classes("w-full")
                     with plot_display:
                         ui.label("Configure and generate a plot to see it here.").classes("text-gray-400 text-center mt-8")
+
+        # ── Metadata & Aggregation ──────────────────────────────────
+        with ui.tab_panel(metadata_tab):
+            ui.label("Experimental Metadata").classes("text-xl font-bold")
+            ui.label(
+                "Map each image/sample to experimental factors (Subject ID, Treatment, "
+                "Genotype, Timepoint, etc.) then aggregate and plot by these factors."
+            ).classes("text-sm text-gray-500 mb-4")
+
+            with ui.row().classes("w-full gap-8"):
+                # ── Upload metadata CSV ──
+                with ui.card().classes("flex-1 p-4"):
+                    ui.label("Upload Metadata CSV").classes("text-lg font-bold")
+                    ui.label(
+                        "CSV with one row per sample. Must include a Sample ID column."
+                    ).classes("text-sm text-gray-500")
+
+                    async def handle_meta_upload(e: events.UploadEventArguments):
+                        try:
+                            content = e.content.read()
+                            meta_io = BytesIO(content)
+                            meta = load_metadata_csv(meta_io, filename=e.name)
+                            state.metadata = meta
+                            ui.notify(
+                                f"Loaded metadata: {len(meta.df)} samples, "
+                                f"factors: {', '.join(meta.factor_columns)}",
+                                type="positive",
+                            )
+                            main_content.refresh()
+                        except Exception as ex:
+                            ui.notify(f"Error loading metadata: {ex}", type="negative")
+
+                    ui.upload(
+                        label="Upload metadata CSV",
+                        auto_upload=True,
+                        on_upload=handle_meta_upload,
+                    ).classes("w-full").props('accept=".csv,.tsv,.xlsx"')
+
+                    # Demo metadata
+                    if ds.sample_ids:
+                        def load_demo_meta():
+                            demo_df = generate_demo_metadata(ds.sample_ids)
+                            state.metadata = ExperimentMetadata(
+                                df=demo_df,
+                                join_key="Sample ID",
+                                factor_columns=[c for c in demo_df.columns if c != "Sample ID"],
+                                filename="demo_metadata.csv",
+                            )
+                            ui.notify("Loaded demo metadata", type="positive")
+                            main_content.refresh()
+
+                        ui.button("Load Demo Metadata", on_click=load_demo_meta,
+                                  color="secondary").classes("w-full mt-2")
+
+                    # Download template
+                    if ds.sample_ids:
+                        def dl_template():
+                            csv_str = metadata_template_csv(ds.sample_ids)
+                            b64 = base64.b64encode(csv_str.encode()).decode()
+                            ui.download(src=f"data:text/csv;base64,{b64}",
+                                        filename="metadata_template.csv")
+
+                        ui.button("Download Template CSV", on_click=dl_template,
+                                  color="secondary").classes("w-full mt-2").props("dense")
+
+                # ── Current metadata status ──
+                with ui.card().classes("flex-1 p-4"):
+                    if state.metadata is not None:
+                        meta = state.metadata
+                        ui.label("Current Metadata").classes("text-lg font-bold")
+
+                        with ui.row().classes("gap-4 mb-4"):
+                            ui.html(f'<div class="metric-card"><div class="value">{len(meta.df)}</div><div class="label">Samples</div></div>')
+                            ui.html(f'<div class="metric-card"><div class="value">{len(meta.factor_columns)}</div><div class="label">Factors</div></div>')
+                            matched = set(meta.df[meta.join_key].astype(str)) & set(str(s) for s in ds.sample_ids)
+                            ui.html(f'<div class="metric-card"><div class="value">{len(matched)}/{len(ds.sample_ids)}</div><div class="label">Matched</div></div>')
+
+                        ui.label(f"Join key: {meta.join_key}").classes("text-sm")
+                        ui.label(f"Factors: {', '.join(meta.factor_columns)}").classes("text-sm text-gray-600")
+
+                        # Preview table
+                        with ui.expansion("Preview Metadata").classes("w-full"):
+                            meta_cols_def = [{"headerName": c, "field": c, "sortable": True}
+                                             for c in meta.df.columns]
+                            meta_rows = meta.df.to_dict("records")
+                            ui.aggrid({
+                                "columnDefs": meta_cols_def,
+                                "rowData": meta_rows,
+                                "defaultColDef": {"flex": 1, "minWidth": 100},
+                            }).classes("w-full").style("height: 250px")
+
+                        # Merge button
+                        def do_merge():
+                            try:
+                                merged_df = merge_metadata(filtered_df, meta)
+                                state.dataset = parse_halo_data(
+                                    merged_df, ds.filename,
+                                    force_type=ds.data_type,
+                                    file_size_mb=ds.file_size_mb,
+                                    total_rows=ds.total_rows,
+                                )
+                                state.filters = {}
+                                ui.notify(
+                                    f"Merged! {len(meta.factor_columns)} columns added. "
+                                    f"Use {', '.join(meta.factor_columns)} as plot groupings.",
+                                    type="positive",
+                                )
+                                main_content.refresh()
+                                sidebar_info.refresh()
+                            except Exception as ex:
+                                ui.notify(f"Merge failed: {ex}", type="negative")
+
+                        ui.button("Merge Metadata into HALO Data",
+                                  on_click=do_merge, color="primary").classes("w-full mt-4")
+                    else:
+                        ui.label("No Metadata Loaded").classes("text-lg font-bold")
+                        ui.label("Upload a metadata CSV or load demo metadata.").classes("text-sm text-gray-500")
+
+            # ── Object data aggregation ──
+            if ds.data_type == "object" and state.metadata is not None:
+                ui.separator()
+                ui.label("Aggregate Object Data to Per-Image Percentages").classes("text-lg font-bold mt-4")
+                ui.label(
+                    "Convert per-cell binary data into per-image percentages, "
+                    "then plot by Treatment, Genotype, Subject ID, etc."
+                ).classes("text-sm text-gray-500")
+
+                agg_options = []
+                if "Sample ID" in filtered_df.columns:
+                    agg_options.append("Sample ID")
+                if "Analysis Region" in filtered_df.columns:
+                    agg_options.append("Analysis Region")
+                if state.metadata:
+                    for fc in state.metadata.factor_columns:
+                        if fc in filtered_df.columns and fc not in agg_options:
+                            agg_options.append(fc)
+
+                agg_group_sel = ui.select(
+                    agg_options, multiple=True, label="Group by",
+                    value=["Sample ID"] if "Sample ID" in agg_options else agg_options[:1],
+                ).classes("w-full max-w-lg")
+
+                agg_result_container = ui.column().classes("w-full")
+
+                def do_aggregate():
+                    try:
+                        agg_df = aggregate_object_data(
+                            filtered_df,
+                            group_cols=agg_group_sel.value,
+                            classification_cols=ds.classification_columns,
+                            phenotype_combo_cols=ds.phenotype_combo_columns,
+                            intensity_cols=(ds.nucleus_intensity_columns + ds.cell_intensity_columns),
+                            morphology_cols=ds.morphology_columns,
+                        )
+                        state.aggregated_df = agg_df
+                        ui.notify(
+                            f"Aggregated {len(filtered_df):,} objects into {len(agg_df):,} groups",
+                            type="positive",
+                        )
+
+                        agg_result_container.clear()
+                        with agg_result_container:
+                            pct_cols = [c for c in agg_df.columns if c.startswith("% ")]
+                            show_cols = list(agg_group_sel.value) + ["Object Count"] + pct_cols
+                            show_cols = [c for c in show_cols if c in agg_df.columns]
+                            display_agg = agg_df[show_cols]
+
+                            agg_col_defs = [{"headerName": c, "field": c, "sortable": True}
+                                            for c in display_agg.columns]
+                            agg_rows = display_agg.round(2).to_dict("records")
+                            ui.aggrid({
+                                "columnDefs": agg_col_defs,
+                                "rowData": agg_rows,
+                                "defaultColDef": {"flex": 1, "minWidth": 100},
+                            }).classes("w-full").style("height: 300px")
+
+                            with ui.row().classes("gap-4 mt-4"):
+                                def use_agg():
+                                    state.dataset = parse_halo_data(
+                                        state.aggregated_df,
+                                        f"{ds.filename}_aggregated",
+                                        force_type="summary",
+                                    )
+                                    state.filters = {}
+                                    ui.notify("Switched to aggregated data for plotting", type="positive")
+                                    main_content.refresh()
+                                    sidebar_info.refresh()
+
+                                ui.button("Use Aggregated Data for Plotting",
+                                          on_click=use_agg, color="primary")
+
+                                def dl_agg():
+                                    csv_str = state.aggregated_df.to_csv(index=False)
+                                    b64 = base64.b64encode(csv_str.encode()).decode()
+                                    ui.download(src=f"data:text/csv;base64,{b64}",
+                                                filename="homer_aggregated.csv")
+
+                                ui.button("Download Aggregated CSV",
+                                          on_click=dl_agg, color="secondary")
+
+                    except Exception as ex:
+                        ui.notify(f"Aggregation failed: {ex}", type="negative")
+
+                ui.button("Aggregate", on_click=do_aggregate, color="primary").classes("mt-2")
 
         # ── Data Processing ──────────────────────────────────────────
         with ui.tab_panel(process_tab):
