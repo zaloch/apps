@@ -12,10 +12,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import streamlit as st
 import pandas as pd
 import numpy as np
+import tempfile
 from io import BytesIO
 
 from homer_core.data_parser import (
-    load_uploaded_file, parse_halo_data, apply_filters,
+    load_file, parse_halo_data, apply_filters,
     get_filterable_columns, get_plottable_numeric_columns, get_grouping_columns,
     get_phenotype_columns, dezero, remove_outliers, sample_for_plotting,
     get_memory_usage_mb, HaloDataset, MAX_INTERACTIVE_ROWS,
@@ -198,10 +199,15 @@ def render_sidebar():
             if file_size_mb > 50:
                 st.sidebar.info(f"Large file detected ({file_size_mb:.0f} MB). Loading with memory optimization...")
 
-            df, total_rows = load_uploaded_file(
-                uploaded_file, uploaded_file.name,
-                file_size_mb=file_size_mb,
-            )
+            # Write to temp file so load_file can use dask for parallel reading
+            suffix = os.path.splitext(uploaded_file.name)[1]
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(uploaded_file.getbuffer())
+                tmp_path = tmp.name
+            try:
+                df, actual_file_size_mb, total_rows = load_file(tmp_path)
+            finally:
+                os.unlink(tmp_path)
             ft = None
             if "Object" in force_type:
                 ft = "object"
