@@ -8,3 +8,4 @@ scipy>=1.11.0
 openpyxl>=3.1.0
 kaleido>=0.2.1
 Pillow>=10.0.0
+dask>=2024.1.0

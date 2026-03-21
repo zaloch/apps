@@ -56,25 +56,26 @@ html, body, [class*="css"] {
 }
 
 .homer-header {
-    background: linear-gradient(135deg, #2E86AB 0%, #1a5276 100%);
+    background: linear-gradient(135deg, #1B2028 0%, #2A2F3A 100%);
+    border: 1px solid #3A3F4A;
     padding: 1.5rem 2rem;
     border-radius: 10px;
     margin-bottom: 1rem;
-    color: white;
+    color: #E0E0E0;
 }
 
 .homer-header h1 {
     margin: 0;
     font-size: 2.2rem;
     font-weight: 700;
-    color: white;
+    color: #4FC3F7;
 }
 
 .homer-header p {
     margin: 0.3rem 0 0 0;
     font-size: 1rem;
     opacity: 0.85;
-    color: white;
+    color: #B0B0B0;
 }
 
 .data-badge {
@@ -86,20 +87,21 @@ html, body, [class*="css"] {
     margin-right: 0.5rem;
 }
 
-.badge-object { background: #d4edda; color: #155724; }
-.badge-summary { background: #cce5ff; color: #004085; }
-.badge-cluster { background: #fff3cd; color: #856404; }
+.badge-object { background: #1B3A2A; color: #81C784; }
+.badge-summary { background: #1A2A3A; color: #4FC3F7; }
+.badge-cluster { background: #3A2F1A; color: #FFB74D; }
 
 .footer {
     position: fixed;
     bottom: 0;
     left: 0;
     width: 100%;
-    background-color: #2E86AB;
+    background-color: #1B2028;
+    border-top: 1px solid #2A2F3A;
     text-align: center;
     padding: 0.3rem 0;
     z-index: 1000;
-    color: white;
+    color: #B0B0B0;
     font-size: 0.8rem;
 }
 </style>

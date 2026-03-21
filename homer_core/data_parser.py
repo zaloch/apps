@@ -12,6 +12,12 @@ from dataclasses import dataclass, field
 from scipy.stats.mstats import winsorize as scipy_winsorize
 import logging
 
+try:
+    import dask.dataframe as dd
+    HAS_DASK = True
+except ImportError:
+    HAS_DASK = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -258,13 +264,98 @@ def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _read_csv_chunked(
+def _read_csv_dask(
+    filepath_or_buffer,
+    sep: str = ",",
+    max_rows: Optional[int] = None,
+) -> Tuple[pd.DataFrame, int]:
+    """Read a CSV using dask for parallel processing.
+
+    Only works with file paths (strings/Path objects), not file-like objects.
+    Falls back to _read_csv_chunked_pandas for file-like objects.
+
+    Returns (DataFrame, total_row_count).
+    """
+    # Dask cannot read file-like objects; fall back for those
+    if not isinstance(filepath_or_buffer, (str, Path)):
+        return _read_csv_chunked_pandas(filepath_or_buffer, sep=sep, max_rows=max_rows)
+
+    filepath_str = str(filepath_or_buffer)
+    logger.info(f"Reading CSV with dask (parallel): {filepath_str}")
+
+    ddf = dd.read_csv(filepath_str, sep=sep, blocksize="64MB")
+    total_rows = len(ddf)  # triggers a compute for row count
+
+    if max_rows is not None and total_rows > max_rows:
+        # Take the first max_rows rows
+        df = ddf.head(max_rows, npartitions=-1, compute=True)
+    else:
+        df = ddf.compute()
+
+    return df, total_rows
+
+
+def dask_aggregate(
+    filepath: str,
+    sep: str = ",",
+    group_cols: Optional[list] = None,
+    agg_dict: Optional[dict] = None,
+    max_rows: Optional[int] = None,
+) -> pd.DataFrame:
+    """Perform parallel groupby aggregation on a large CSV using dask.
+
+    Reads the file with dask, applies groupby().agg() lazily, then computes
+    the result to a pandas DataFrame. This is useful when you want to aggregate
+    a huge file without loading it all into memory.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the CSV file.
+    sep : str
+        Column separator (default ',').
+    group_cols : list
+        Columns to group by.
+    agg_dict : dict
+        Aggregation specification, e.g. {'Total Cells': 'sum', 'H-Score': 'mean'}.
+    max_rows : int, optional
+        If set, only read up to this many rows before aggregating.
+
+    Returns
+    -------
+    pd.DataFrame
+        Aggregated result as a pandas DataFrame.
+    """
+    if not HAS_DASK:
+        raise RuntimeError(
+            "dask is required for dask_aggregate but is not installed. "
+            "Install it with: pip install 'dask[dataframe]'"
+        )
+    if group_cols is None or agg_dict is None:
+        raise ValueError("group_cols and agg_dict are required for dask_aggregate")
+
+    ddf = dd.read_csv(str(filepath), sep=sep, blocksize="64MB")
+
+    if max_rows is not None:
+        ddf = ddf.head(max_rows, npartitions=-1, compute=False)
+        # head returns a pandas DF when compute=True; wrap back into dask
+        if isinstance(ddf, pd.DataFrame):
+            ddf = dd.from_pandas(ddf, npartitions=1)
+
+    result = ddf.groupby(group_cols).agg(agg_dict)
+    return result.compute().reset_index()
+
+
+def _read_csv_chunked_pandas(
     filepath_or_buffer,
     sep: str = ",",
     max_rows: Optional[int] = None,
     sample_frac: Optional[float] = None,
 ) -> Tuple[pd.DataFrame, int]:
-    """Read a CSV in chunks, optionally sampling or capping rows.
+    """Read a CSV in chunks using pandas, optionally sampling or capping rows.
+
+    This is the pure-pandas fallback used when dask is unavailable or when
+    the input is a file-like object that dask cannot handle.
 
     Returns (DataFrame, total_row_count).
     If file fits in memory, returns all rows.
@@ -298,6 +389,32 @@ def _read_csv_chunked(
     return df, total_rows
 
 
+def _read_csv_chunked(
+    filepath_or_buffer,
+    sep: str = ",",
+    max_rows: Optional[int] = None,
+    sample_frac: Optional[float] = None,
+) -> Tuple[pd.DataFrame, int]:
+    """Read a CSV in chunks, optionally sampling or capping rows.
+
+    When dask is available and the input is a file path (not a file-like object),
+    uses dask for parallel reading. Otherwise falls back to pandas chunked reading.
+
+    Returns (DataFrame, total_row_count).
+    If file fits in memory, returns all rows.
+    """
+    # Use dask for file paths when available and no sampling is requested
+    if HAS_DASK and isinstance(filepath_or_buffer, (str, Path)) and sample_frac is None:
+        try:
+            return _read_csv_dask(filepath_or_buffer, sep=sep, max_rows=max_rows)
+        except Exception as e:
+            logger.warning(f"Dask read failed, falling back to pandas chunked: {e}")
+
+    return _read_csv_chunked_pandas(
+        filepath_or_buffer, sep=sep, max_rows=max_rows, sample_frac=sample_frac,
+    )
+
+
 def load_file(
     filepath: str,
     sheet_name: Optional[str] = None,
@@ -318,8 +435,9 @@ def load_file(
     effective_max = max_rows
     if is_large and effective_max is None:
         effective_max = MAX_INTERACTIVE_ROWS
+        dask_note = " (dask parallel reading enabled)" if HAS_DASK else ""
         logger.info(
-            f"Large file detected ({file_size_mb:.0f} MB). "
+            f"Large file detected ({file_size_mb:.0f} MB){dask_note}. "
             f"Capping at {MAX_INTERACTIVE_ROWS:,} rows for interactive use."
         )
 
