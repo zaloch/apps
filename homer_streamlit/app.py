@@ -50,60 +50,249 @@ st.set_page_config(
 
 CUSTOM_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
 }
 
+/* ── Header ─────────────────────────────────────────────────────────────── */
 .homer-header {
-    background: linear-gradient(135deg, #1B2028 0%, #2A2F3A 100%);
-    border: 1px solid #3A3F4A;
-    padding: 1.5rem 2rem;
-    border-radius: 10px;
-    margin-bottom: 1rem;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    border: 1px solid rgba(99, 179, 237, 0.15);
+    padding: 1.8rem 2.5rem;
+    border-radius: 16px;
+    margin-bottom: 1.5rem;
     color: #E0E0E0;
+    position: relative;
+    overflow: hidden;
 }
-
+.homer-header::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #4FC3F7, #7C4DFF, #4FC3F7);
+    border-radius: 16px 16px 0 0;
+}
 .homer-header h1 {
     margin: 0;
-    font-size: 2.2rem;
-    font-weight: 700;
-    color: #4FC3F7;
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, #4FC3F7, #81D4FA);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
-
 .homer-header p {
-    margin: 0.3rem 0 0 0;
-    font-size: 1rem;
-    opacity: 0.85;
-    color: #B0B0B0;
+    margin: 0.25rem 0 0 0;
+    font-size: 0.9rem;
+    color: #94a3b8;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+}
+.homer-header .version-tag {
+    position: absolute;
+    top: 1.2rem;
+    right: 2rem;
+    background: rgba(99, 179, 237, 0.1);
+    color: #4FC3F7;
+    padding: 0.2rem 0.7rem;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    border: 1px solid rgba(99, 179, 237, 0.2);
 }
 
+/* ── Data Badges ────────────────────────────────────────────────────────── */
 .data-badge {
     display: inline-block;
-    padding: 0.25rem 0.75rem;
+    padding: 0.3rem 0.85rem;
     border-radius: 20px;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     font-weight: 600;
     margin-right: 0.5rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+.badge-object { background: rgba(129, 199, 132, 0.12); color: #66BB6A; border: 1px solid rgba(129, 199, 132, 0.25); }
+.badge-summary { background: rgba(79, 195, 247, 0.12); color: #4FC3F7; border: 1px solid rgba(79, 195, 247, 0.25); }
+.badge-cluster { background: rgba(255, 183, 77, 0.12); color: #FFB74D; border: 1px solid rgba(255, 183, 77, 0.25); }
+
+/* ── Metric Cards ───────────────────────────────────────────────────────── */
+.metric-card {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    padding: 1.2rem 1.5rem;
+    border-radius: 12px;
+    border: 1px solid rgba(99, 179, 237, 0.1);
+    text-align: center;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.metric-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(99, 179, 237, 0.3);
+}
+.metric-card .value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #4FC3F7;
+    line-height: 1.2;
+}
+.metric-card .label {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 0.3rem;
 }
 
-.badge-object { background: #1B3A2A; color: #81C784; }
-.badge-summary { background: #1A2A3A; color: #4FC3F7; }
-.badge-cluster { background: #3A2F1A; color: #FFB74D; }
+/* ── Section Headers ────────────────────────────────────────────────────── */
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid rgba(99, 179, 237, 0.1);
+}
+.section-header .icon {
+    font-size: 1.3rem;
+}
+.section-header h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #e2e8f0;
+}
 
+/* ── Getting Started Cards ──────────────────────────────────────────────── */
+.getting-started-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+.gs-card {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border: 1px solid rgba(99, 179, 237, 0.1);
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.gs-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(99, 179, 237, 0.25);
+}
+.gs-card .gs-icon {
+    font-size: 1.8rem;
+    margin-bottom: 0.6rem;
+}
+.gs-card h4 {
+    margin: 0 0 0.4rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #e2e8f0;
+}
+.gs-card p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #94a3b8;
+    line-height: 1.5;
+}
+
+/* ── Workflow Steps ──────────────────────────────────────────────────────── */
+.workflow-steps {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 1rem 0;
+}
+.workflow-step {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(30, 41, 59, 0.8);
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    border: 1px solid rgba(99, 179, 237, 0.08);
+    font-size: 0.8rem;
+    color: #cbd5e1;
+}
+.workflow-step .step-num {
+    background: rgba(79, 195, 247, 0.15);
+    color: #4FC3F7;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+.workflow-step .step-arrow {
+    color: #475569;
+    margin-left: 0.3rem;
+}
+
+/* ── Plot Types Grid ────────────────────────────────────────────────────── */
+.plot-types-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.8rem;
+}
+.plot-chip {
+    background: rgba(30, 41, 59, 0.9);
+    border: 1px solid rgba(99, 179, 237, 0.1);
+    padding: 0.3rem 0.7rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    color: #94a3b8;
+    font-weight: 500;
+}
+
+/* ── Sidebar Styling ────────────────────────────────────────────────────── */
+.sidebar-section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    margin-top: 1rem;
+    margin-bottom: 0.4rem;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
 .footer {
     position: fixed;
     bottom: 0;
     left: 0;
     width: 100%;
-    background-color: #1B2028;
-    border-top: 1px solid #2A2F3A;
+    background: linear-gradient(180deg, transparent, #0f172a);
+    border-top: 1px solid rgba(99, 179, 237, 0.08);
     text-align: center;
-    padding: 0.3rem 0;
+    padding: 0.5rem 0;
     z-index: 1000;
-    color: #B0B0B0;
-    font-size: 0.8rem;
+    color: #475569;
+    font-size: 0.75rem;
+    letter-spacing: 0.02em;
+}
+
+/* ── Streamlit Overrides ────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.3rem;
+    background: rgba(15, 23, 42, 0.5);
+    padding: 0.3rem;
+    border-radius: 10px;
+    border: 1px solid rgba(99, 179, 237, 0.08);
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 500;
 }
 </style>
 """
@@ -133,6 +322,7 @@ def display_header():
     <div class="homer-header">
         <h1>HOMER</h1>
         <p>Halo Output Mapper &amp; Explorer for Research</p>
+        <span class="version-tag">v1.0</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -140,7 +330,7 @@ def display_header():
 def display_footer():
     st.markdown("""
     <div class="footer">
-        Homer v1.0 | HALO Data Dashboard | Built with Streamlit
+        Homer v1.0 &nbsp;&middot;&nbsp; HALO Data Dashboard &nbsp;&middot;&nbsp; Built with Streamlit
     </div>
     """, unsafe_allow_html=True)
 
@@ -148,7 +338,7 @@ def display_footer():
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 
 def render_sidebar():
-    st.sidebar.markdown("## Data Upload")
+    st.sidebar.markdown('<div class="sidebar-section-title">Data Upload</div>', unsafe_allow_html=True)
 
     uploaded_file = st.sidebar.file_uploader(
         "Upload HALO data file",
@@ -169,7 +359,7 @@ def render_sidebar():
 
     # Demo data
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### Demo Data")
+    st.sidebar.markdown('<div class="sidebar-section-title">Quick Start &mdash; Demo Data</div>', unsafe_allow_html=True)
     dc1, dc2, dc3 = st.sidebar.columns(3)
     load_demo_object = dc1.button("Object", use_container_width=True)
     load_demo_summary = dc2.button("Summary", use_container_width=True)
@@ -237,7 +427,7 @@ def render_sidebar():
     dataset = st.session_state.dataset
     if dataset is not None:
         st.sidebar.markdown("---")
-        st.sidebar.markdown("### Filters")
+        st.sidebar.markdown('<div class="sidebar-section-title">Filters</div>', unsafe_allow_html=True)
 
         filterable = get_filterable_columns(dataset)
         filterable = [c for c in filterable if c in dataset.df.columns and dataset.df[c].nunique() <= 100]
@@ -252,7 +442,7 @@ def render_sidebar():
 
         # Dataset info
         st.sidebar.markdown("---")
-        st.sidebar.markdown("### Dataset Info")
+        st.sidebar.markdown('<div class="sidebar-section-title">Dataset Info</div>', unsafe_allow_html=True)
         badge_map = {"object": "badge-object", "summary": "badge-summary", "cluster": "badge-cluster"}
         badge_class = badge_map.get(dataset.data_type, "badge-summary")
         st.sidebar.markdown(
@@ -328,7 +518,7 @@ PLOT_TYPES = [
 
 
 def render_plot_builder(dataset: HaloDataset, filtered_df: pd.DataFrame):
-    st.markdown("### Plot Builder")
+    st.markdown('<div class="section-header"><span class="icon">📊</span><h3>Plot Builder</h3></div>', unsafe_allow_html=True)
 
     col_config, col_preview = st.columns([1, 2])
 
@@ -510,7 +700,7 @@ def _render_download_buttons(fig, title, plot_type, x_col, y_col):
 
 def render_data_processing(dataset: HaloDataset, filtered_df: pd.DataFrame):
     """Render data processing tools (dezero, outlier removal)."""
-    st.markdown("### Data Processing")
+    st.markdown('<div class="section-header"><span class="icon">🧹</span><h3>Data Processing</h3></div>', unsafe_allow_html=True)
     st.caption("Tools for cleaning data, mirroring the anima HaloMunger and ClusterCleaner workflows.")
 
     col1, col2 = st.columns(2)
@@ -577,7 +767,7 @@ def render_data_processing(dataset: HaloDataset, filtered_df: pd.DataFrame):
 # ── Data Table ───────────────────────────────────────────────────────────────
 
 def render_data_table(filtered_df: pd.DataFrame):
-    st.markdown("### Data Table")
+    st.markdown('<div class="section-header"><span class="icon">📋</span><h3>Data Table</h3></div>', unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
@@ -608,7 +798,7 @@ def render_data_table(filtered_df: pd.DataFrame):
 # ── Summary Statistics ───────────────────────────────────────────────────────
 
 def render_summary_stats(dataset: HaloDataset, filtered_df: pd.DataFrame):
-    st.markdown("### Summary Statistics")
+    st.markdown('<div class="section-header"><span class="icon">📈</span><h3>Summary Statistics</h3></div>', unsafe_allow_html=True)
 
     metric_cols = st.columns(5)
     with metric_cols[0]:
@@ -664,7 +854,7 @@ def render_summary_stats(dataset: HaloDataset, filtered_df: pd.DataFrame):
 # ── Report Download ──────────────────────────────────────────────────────────
 
 def render_report_section(dataset: HaloDataset, filtered_df: pd.DataFrame):
-    st.markdown("### Report Generation")
+    st.markdown('<div class="section-header"><span class="icon">📄</span><h3>Report Generation</h3></div>', unsafe_allow_html=True)
 
     n_figs = len(st.session_state.report_figures)
     st.info(f"Report contains {n_figs} figure(s). Add figures via 'Add to Report' in Plot Builder.")
@@ -704,7 +894,7 @@ def render_report_section(dataset: HaloDataset, filtered_df: pd.DataFrame):
 
 def render_metadata_tab(dataset: HaloDataset, filtered_df: pd.DataFrame):
     """Render metadata management: upload, manual entry, merge, and aggregation."""
-    st.markdown("### Experimental Metadata")
+    st.markdown('<div class="section-header"><span class="icon">🧬</span><h3>Experimental Metadata</h3></div>', unsafe_allow_html=True)
     st.caption(
         "Map each image/sample to experimental factors (Subject ID, Treatment, Genotype, "
         "Timepoint, etc.) then aggregate and plot as a function of these factors."
@@ -931,38 +1121,82 @@ def main():
 
     if dataset is None:
         st.markdown("""
-        ### Getting Started
+        <div class="workflow-steps">
+            <div class="workflow-step"><span class="step-num">1</span> Upload data</div>
+            <div class="workflow-step"><span class="step-num">2</span> Add metadata</div>
+            <div class="workflow-step"><span class="step-num">3</span> Merge &amp; aggregate</div>
+            <div class="workflow-step"><span class="step-num">4</span> Plot &amp; explore</div>
+            <div class="workflow-step"><span class="step-num">5</span> Export report</div>
+        </div>
 
-        1. **Upload** a HALO data file (CSV, TSV, or Excel) using the sidebar
-        2. Or click **Object** / **Summary** / **Cluster** demo buttons
-        3. Add **experimental metadata** (Treatment, Genotype, Subject ID, Timepoint)
-        4. **Merge** metadata and **aggregate** object data to per-image percentages
-        5. Build **interactive plots** grouped by experimental factors
-        6. **Download** individual figures (PNG/SVG) or a full PDF report
+        <div class="getting-started-grid">
+            <div class="gs-card">
+                <div class="gs-icon">📂</div>
+                <h4>Upload HALO Data</h4>
+                <p>Import CSV, TSV, or Excel files exported from HALO. Auto-detects object, summary, or cluster data types.</p>
+            </div>
+            <div class="gs-card">
+                <div class="gs-icon">🧪</div>
+                <h4>Try Demo Data</h4>
+                <p>Click <strong>Object</strong>, <strong>Summary</strong>, or <strong>Cluster</strong> in the sidebar to explore with sample data instantly.</p>
+            </div>
+            <div class="gs-card">
+                <div class="gs-icon">🧬</div>
+                <h4>Add Metadata</h4>
+                <p>Map samples to experimental factors (Treatment, Genotype, Subject ID, Timepoint) for biological analysis.</p>
+            </div>
+            <div class="gs-card">
+                <div class="gs-icon">📊</div>
+                <h4>Build Plots</h4>
+                <p>Create interactive visualizations: Bar, Scatter, Box, Violin, Strip, Heatmap, Pairplot, and more.</p>
+            </div>
+            <div class="gs-card">
+                <div class="gs-icon">🔬</div>
+                <h4>Process Data</h4>
+                <p>Clean data with de-zero filtering and outlier removal (IQR, percentile, std dev, winsorize).</p>
+            </div>
+            <div class="gs-card">
+                <div class="gs-icon">📄</div>
+                <h4>Export Reports</h4>
+                <p>Download individual plots as PNG/SVG, or compile a multi-figure PDF report for publication.</p>
+            </div>
+        </div>
 
-        #### Supported HALO Data Types
-        - **Object Data**: Per-cell exports with classifications, intensities, phenotypes
-        - **Summary Data**: HALO analysis output (cell counts, fractions, H-Scores)
-        - **Cluster Data**: Aggregated object data
+        <div style="margin-top: 1rem;">
+            <div style="font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem;">Supported Data Types</div>
+            <div class="plot-types-row">
+                <span class="plot-chip" style="border-color: rgba(129, 199, 132, 0.25); color: #66BB6A;">Object Data</span>
+                <span class="plot-chip" style="border-color: rgba(79, 195, 247, 0.25); color: #4FC3F7;">Summary Data</span>
+                <span class="plot-chip" style="border-color: rgba(255, 183, 77, 0.25); color: #FFB74D;">Cluster Data</span>
+            </div>
+        </div>
 
-        #### Metadata Workflow
-        1. Upload your HALO data (object or summary)
-        2. Go to the **Metadata** tab to upload or manually enter experimental info
-        3. **Merge** metadata into your data to add Treatment, Genotype, etc. columns
-        4. For object data: **Aggregate** per-cell data into per-image percentages
-        5. Plot percentages as a function of Treatment, Subject ID, Genotype, Day, etc.
-
-        #### Available Plot Types
-        Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatmap, Pairplot Matrix, Sample Overview
-        """)
+        <div style="margin-top: 1rem;">
+            <div style="font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem;">Available Plot Types</div>
+            <div class="plot-types-row">
+                <span class="plot-chip">Bar Chart</span>
+                <span class="plot-chip">Stacked Bar</span>
+                <span class="plot-chip">Scatter Plot</span>
+                <span class="plot-chip">Box Plot</span>
+                <span class="plot-chip">Violin Plot</span>
+                <span class="plot-chip">Strip Plot</span>
+                <span class="plot-chip">Swarm Plot</span>
+                <span class="plot-chip">Histogram</span>
+                <span class="plot-chip">XY Line</span>
+                <span class="plot-chip">Heatmap</span>
+                <span class="plot-chip">Pairplot Matrix</span>
+                <span class="plot-chip">Sample Overview</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         display_footer()
         return
 
     filtered_df = apply_filters(dataset.df, st.session_state.filters)
 
     tab_plots, tab_metadata, tab_process, tab_table, tab_stats, tab_report = st.tabs([
-        "Plot Builder", "Metadata & Aggregation", "Data Processing",
-        "Data Table", "Summary Statistics", "Report",
+        "📊 Plot Builder", "🧬 Metadata", "🧹 Processing",
+        "📋 Data Table", "📈 Statistics", "📄 Report",
     ])
 
     with tab_plots:
