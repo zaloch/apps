@@ -291,17 +291,46 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
         ui.notify(f"Error loading file: {ex}", type="negative")
 
 
-def load_demo(demo_type: str, n_samples: int = 8, n_objects: int = 5000):
+def load_demo(demo_type: str, n_samples: int = 8, n_objects: int = 5000, auto_agg: bool = True):
     if demo_type == "object":
         df = generate_object_data(n_cells=n_objects, n_images=n_samples)
-        state.dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
+        dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
+        state.dataset = dataset
+        state.filters = {}
+
+        if auto_agg:
+            group_cols = []
+            for col in ["Sample ID", "Analysis Region"]:
+                if col in df.columns:
+                    group_cols.append(col)
+            meta_factors = ["Treatment Group", "Genotype", "Timepoint",
+                            "Subject ID", "Sex", "Age", "Dose", "Cohort"]
+            for col in meta_factors:
+                if col in df.columns and col not in group_cols:
+                    group_cols.append(col)
+
+            agg_df = aggregate_object_data(
+                df,
+                group_cols=group_cols,
+                classification_cols=dataset.classification_columns,
+                phenotype_combo_cols=dataset.phenotype_combo_columns,
+                intensity_cols=(dataset.nucleus_intensity_columns +
+                                dataset.cell_intensity_columns),
+                morphology_cols=dataset.morphology_columns,
+            )
+            state.aggregated_df = agg_df
+            state.dataset = parse_histology_data(
+                agg_df, "demo_object_data_aggregated.csv",
+                force_type="summary",
+            )
     elif demo_type == "summary":
         df = generate_summary_data(n_images=n_samples)
         state.dataset = parse_histology_data(df, "demo_summary_data.csv")
+        state.filters = {}
     elif demo_type == "cluster":
         df = generate_cluster_data(n_clusters=n_objects, n_images=n_samples)
         state.dataset = parse_histology_data(df, "demo_cluster_data.csv", force_type="cluster")
-    state.filters = {}
+        state.filters = {}
     ui.notify(f"Loaded {demo_type} demo data ({n_samples} samples)", type="positive")
     main_content.refresh()
     sidebar_info.refresh()
@@ -1101,9 +1130,11 @@ def index():
         with ui.expansion("Simulation Settings", icon="tune").classes("w-full"):
             demo_n_samples = ui.number("Samples / images", value=8, min=2, max=100, step=1).classes("w-full")
             demo_n_objects = ui.number("Objects / cells", value=5000, min=100, max=100000, step=500).classes("w-full")
+            demo_auto_agg = ui.checkbox("Auto-aggregate object data", value=True).tooltip(
+                "Automatically aggregate per-cell object data into per-image percentages for immediate plotting by Treatment, Genotype, etc.")
 
         with ui.row().classes("w-full gap-2"):
-            ui.button("Object", on_click=lambda: load_demo("object", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
+            ui.button("Object", on_click=lambda: load_demo("object", int(demo_n_samples.value), int(demo_n_objects.value), demo_auto_agg.value), color="primary").props("dense").classes("flex-1")
             ui.button("Summary", on_click=lambda: load_demo("summary", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
             ui.button("Cluster", on_click=lambda: load_demo("cluster", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
 

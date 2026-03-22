@@ -364,6 +364,8 @@ def render_sidebar():
     with st.sidebar.expander("Simulation Settings"):
         demo_n_samples = st.number_input("Number of samples / images", min_value=2, max_value=100, value=8, step=1, key="demo_n_samples")
         demo_n_objects = st.number_input("Number of objects / cells", min_value=100, max_value=100000, value=5000, step=500, key="demo_n_objects")
+        demo_auto_agg = st.checkbox("Auto-aggregate object data", value=True, key="demo_auto_agg",
+                                    help="Automatically aggregate per-cell object data into per-image percentages for immediate plotting by Treatment, Genotype, etc.")
 
     dc1, dc2, dc3 = st.sidebar.columns(3)
     load_demo_object = dc1.button("Object", use_container_width=True)
@@ -372,8 +374,38 @@ def render_sidebar():
 
     if load_demo_object:
         df = generate_object_data(n_cells=demo_n_objects, n_images=demo_n_samples)
-        st.session_state.dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
+        dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
+        st.session_state.dataset = dataset
         st.session_state.filters = {}
+
+        if demo_auto_agg:
+            # Build grouping columns: Sample ID + Analysis Region + all metadata factors
+            group_cols = []
+            for col in ["Sample ID", "Analysis Region"]:
+                if col in df.columns:
+                    group_cols.append(col)
+            meta_factors = ["Treatment Group", "Genotype", "Timepoint",
+                            "Subject ID", "Sex", "Age", "Dose", "Cohort"]
+            for col in meta_factors:
+                if col in df.columns and col not in group_cols:
+                    group_cols.append(col)
+
+            agg_df = aggregate_object_data(
+                df,
+                group_cols=group_cols,
+                classification_cols=dataset.classification_columns,
+                phenotype_combo_cols=dataset.phenotype_combo_columns,
+                intensity_cols=(dataset.nucleus_intensity_columns +
+                                dataset.cell_intensity_columns),
+                morphology_cols=dataset.morphology_columns,
+            )
+            st.session_state.aggregated_df = agg_df
+            # Switch directly to aggregated view for plotting
+            st.session_state.dataset = parse_histology_data(
+                agg_df, "demo_object_data_aggregated.csv",
+                force_type="summary",
+            )
+
         st.rerun()
 
     if load_demo_summary:
