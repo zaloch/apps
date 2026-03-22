@@ -48,17 +48,46 @@ def generate_object_data(n_cells: int = 5000, n_images: int = 3) -> pd.DataFrame
     DAPI+, DAPI-,
     DAPI Positive Classification, DAPI Nucleus Intensity, etc. per channel,
     Cell Area, Cytoplasm Area, Nucleus Area, Nucleus Perimeter, Nucleus Roundness
+
+    Includes Treatment Group, Genotype, Subject ID, and Timepoint columns
+    with biologically plausible treatment effects on marker expression.
     """
     rng = np.random.default_rng(42)
 
     # Fluorophore channels (matching the screenshot)
     channels = ["DAPI", "Cy5", "5-FAM", "Spectrum Aqua", "Rhodamine 6G"]
 
-    # Image locations (Windows-style paths like real HALO)
-    image_locs = [
-        f"\\\\server\\halo_data\\Study_001\\Slide_{i+1:03d}.scn"
-        for i in range(n_images)
-    ]
+    # Treatment design: balanced across images
+    treatments = ["Vehicle", "Drug A", "Drug B", "Drug A + Drug B"]
+    genotypes = ["WT", "KO"]
+    timepoints = ["Day 7", "Day 14"]
+
+    # Build per-image assignments so each image belongs to one condition
+    n_images = max(n_images, len(treatments))  # ensure at least 1 image per treatment
+    image_meta = []
+    for i in range(n_images):
+        trt = treatments[i % len(treatments)]
+        geno = genotypes[i % len(genotypes)]
+        tp = timepoints[i % len(timepoints)]
+        subj = f"SUB-{100 + i}"
+        image_meta.append({
+            "image_loc": f"\\\\server\\halo_data\\Study_001\\Slide_{i+1:03d}.scn",
+            "treatment": trt,
+            "genotype": geno,
+            "timepoint": tp,
+            "subject_id": subj,
+        })
+
+    # Treatment effect modifiers on channel positivity rates
+    # Drug A increases C1/C2, Drug B increases C3/C4, combo increases all
+    treatment_effects = {
+        "Vehicle":        [0.25, 0.20, 0.20, 0.25],
+        "Drug A":         [0.55, 0.50, 0.20, 0.25],
+        "Drug B":         [0.25, 0.20, 0.50, 0.55],
+        "Drug A + Drug B":[0.55, 0.50, 0.50, 0.55],
+    }
+
+    image_locs = [m["image_loc"] for m in image_meta]
     regions = ["Whole Brain", "Cortex", "Hippocampus", "Cerebellum"]
     algorithms = ["RGM_R802_GFP NeuN"]
 
@@ -67,7 +96,9 @@ def generate_object_data(n_cells: int = 5000, n_images: int = 3) -> pd.DataFrame
 
     records = []
     for obj_id in range(n_cells):
-        image_loc = rng.choice(image_locs)
+        img_idx = rng.integers(0, len(image_meta))
+        meta = image_meta[img_idx]
+        image_loc = meta["image_loc"]
         region = rng.choice(regions, p=[0.4, 0.25, 0.2, 0.15])
         algo = algorithms[0]
 
@@ -86,12 +117,16 @@ def generate_object_data(n_cells: int = 5000, n_images: int = 3) -> pd.DataFrame
             "XMax": round(x_min + width, 1),
             "YMin": round(y_min, 1),
             "YMax": round(y_min + height, 1),
+            "Treatment Group": meta["treatment"],
+            "Genotype": meta["genotype"],
+            "Timepoint": meta["timepoint"],
+            "Subject ID": meta["subject_id"],
         }
 
-        # Generate phenotype combo binary values
-        # In real data, exactly one DAPI+ combo and one DAPI- combo will be 1
+        # Generate phenotype combo binary values with treatment effects
         dapi_positive = rng.random() > 0.05  # ~95% DAPI+
-        c_positives = [rng.random() > 0.6 for _ in range(4)]  # each channel ~40% positive
+        base_rates = treatment_effects[meta["treatment"]]
+        c_positives = [rng.random() < rate for rate in base_rates]
 
         for combo in phenotype_combos:
             parts = combo.strip().split()
@@ -113,7 +148,7 @@ def generate_object_data(n_cells: int = 5000, n_images: int = 3) -> pd.DataFrame
         row["DAPI+"] = 1 if dapi_positive else 0
         row["DAPI-"] = 0 if dapi_positive else 1
 
-        # Per-channel metrics
+        # Per-channel metrics (intensity shifted by treatment)
         for i, ch in enumerate(channels):
             is_positive = c_positives[i] if i < len(c_positives) else (rng.random() > 0.5)
 
@@ -147,26 +182,51 @@ def generate_summary_data(n_images: int = 12) -> pd.DataFrame:
     Column naming matches actual HALO analysis output:
     Image Tag, Algorithm Name, Job Id, Analysis Region,
     Total Cells, cell counts and fractions, H-Score, Intensity
+
+    Includes Treatment Group, Genotype, Subject ID, and Timepoint columns
+    with biologically plausible treatment effects on immune cell infiltration.
     """
     rng = np.random.default_rng(42)
 
+    # Treatment design
+    treatments = ["Vehicle", "Anti-PD1", "Anti-CTLA4", "Anti-PD1 + Anti-CTLA4"]
+    genotypes = ["WT", "KO"]
+    timepoints = ["Day 7", "Day 14"]
+
+    # Ensure enough images for balanced design
+    n_images = max(n_images, len(treatments) * 2)
     image_tags = [f"Patient_{i+1:03d}_Biopsy.scn" for i in range(n_images)]
     algorithms = ["Multiplex IHC v3.2.1", "Highplex FL v4.2.3"]
     regions = ["Tumor", "Stroma"]
 
+    # Treatment effect multipliers on immune cell %: [CD3, CD8, PD-L1, CD68]
+    treatment_effects = {
+        "Vehicle":               {"cd3": 1.0, "cd8": 1.0, "pdl1": 1.0, "cd68": 1.0},
+        "Anti-PD1":              {"cd3": 1.6, "cd8": 2.0, "pdl1": 0.5, "cd68": 1.2},
+        "Anti-CTLA4":            {"cd3": 1.8, "cd8": 1.5, "pdl1": 0.8, "cd68": 1.4},
+        "Anti-PD1 + Anti-CTLA4": {"cd3": 2.2, "cd8": 2.5, "pdl1": 0.3, "cd68": 1.6},
+    }
+
     records = []
-    for image_tag in image_tags:
+    for i, image_tag in enumerate(image_tags):
+        trt = treatments[i % len(treatments)]
+        geno = genotypes[i % len(genotypes)]
+        tp = timepoints[i % len(timepoints)]
+        subj_id = f"SUB-{100 + i}"
+        effects = treatment_effects[trt]
+
         algo = rng.choice(algorithms)
         job_id = rng.integers(100000, 999999)
 
         for region in regions:
             total_cells = rng.integers(500, 15000)
-            cd3_pct = rng.uniform(5, 45) if region == "Tumor" else rng.uniform(10, 60)
+            base_cd3 = rng.uniform(5, 45) if region == "Tumor" else rng.uniform(10, 60)
+            cd3_pct = min(base_cd3 * effects["cd3"], 90)
             cd4_pct = cd3_pct * rng.uniform(0.3, 0.6)
-            cd8_pct = cd3_pct * rng.uniform(0.2, 0.5)
+            cd8_pct = min(cd3_pct * rng.uniform(0.2, 0.5) * effects["cd8"] / effects["cd3"], 60)
             cd20_pct = rng.uniform(2, 20)
-            cd68_pct = rng.uniform(5, 35)
-            pdl1_pct = rng.uniform(0, 40)
+            cd68_pct = min(rng.uniform(5, 35) * effects["cd68"], 60)
+            pdl1_pct = max(rng.uniform(0, 40) * effects["pdl1"], 0)
 
             cd3_total = int(total_cells * cd3_pct / 100)
             cd3_weak_pct = rng.uniform(20, 50)
@@ -181,6 +241,10 @@ def generate_summary_data(n_images: int = 12) -> pd.DataFrame:
                 "Algorithm Name": algo,
                 "Job Id": int(job_id),
                 "Analysis Region": region,
+                "Treatment Group": trt,
+                "Genotype": geno,
+                "Timepoint": tp,
+                "Subject ID": subj_id,
                 "Total Cells": int(total_cells),
                 "CD3+ Cells": int(cd3_total),
                 "CD4+ Cells": int(total_cells * cd4_pct / 100),
@@ -198,8 +262,8 @@ def generate_summary_data(n_images: int = 12) -> pd.DataFrame:
                 "% CD3 Moderate Cells": round(cd3_mod_pct * cd3_pct / 100, 2),
                 "% CD3 Strong Cells": round(cd3_strong_pct * cd3_pct / 100, 2),
                 "% Negative Cells": round(100 - cd3_pct - cd20_pct - cd68_pct, 2),
-                "CD3 H-Score": round(rng.uniform(0, 300), 1),
-                "PD-L1 H-Score": round(rng.uniform(0, 300), 1),
+                "CD3 H-Score": round(rng.uniform(0, 300) * effects["cd3"], 1),
+                "PD-L1 H-Score": round(rng.uniform(0, 300) * effects["pdl1"], 1),
                 "DAPI Nucleus Intensity": round(rng.lognormal(5.0, 0.3), 2),
                 "Region Area (\u03bcm\u00b2)": round(region_area, 2),
                 "Analyzed Area (mm^2)": round(analyzed_area, 3),
@@ -212,34 +276,66 @@ def generate_summary_data(n_images: int = 12) -> pd.DataFrame:
 
 
 def generate_cluster_data(n_clusters: int = 200, n_images: int = 4) -> pd.DataFrame:
-    """Generate realistic HALO cluster/aggregated object data."""
+    """Generate realistic HALO cluster/aggregated object data.
+
+    Includes Treatment Group, Genotype, Subject ID, and Timepoint columns
+    with biologically plausible treatment effects on cluster composition.
+    """
     rng = np.random.default_rng(42)
 
-    image_tags = [f"Sample_{i+1:03d}.scn" for i in range(n_images)]
+    treatments = ["Vehicle", "Drug A", "Drug B", "Drug A + Drug B"]
+    genotypes = ["WT", "KO"]
+    timepoints = ["Day 7", "Day 14"]
+
+    n_images = max(n_images, len(treatments))
+    image_meta = []
+    for i in range(n_images):
+        trt = treatments[i % len(treatments)]
+        geno = genotypes[i % len(genotypes)]
+        tp = timepoints[i % len(timepoints)]
+        image_meta.append({
+            "tag": f"Sample_{i+1:03d}.scn",
+            "sample_id": f"Sample_{i+1:03d}",
+            "treatment": trt,
+            "genotype": geno,
+            "timepoint": tp,
+            "subject_id": f"SUB-{100 + i}",
+        })
+
+    # Treatment effects on CD3/CD8 fractions
+    treatment_mult = {
+        "Vehicle": 1.0, "Drug A": 1.5, "Drug B": 1.4, "Drug A + Drug B": 2.0,
+    }
+
     algorithms = ["Multiplex IHC v3.2.1"]
 
     records = []
     for _ in range(n_clusters):
-        image_tag = rng.choice(image_tags)
+        meta = image_meta[rng.integers(0, len(image_meta))]
+        mult = treatment_mult[meta["treatment"]]
         total_cells = rng.integers(10, 500)
         region_area = rng.uniform(1000, 50000)
 
         records.append({
-            "Sample ID": image_tag.replace(".scn", ""),
+            "Sample ID": meta["sample_id"],
             "Algorithm Name": algorithms[0],
             "Job ID": int(rng.integers(100000, 999999)),
+            "Treatment Group": meta["treatment"],
+            "Genotype": meta["genotype"],
+            "Timepoint": meta["timepoint"],
+            "Subject ID": meta["subject_id"],
             "Total Cluster Count": rng.integers(1, 50),
             "Total Cell Count": int(total_cells),
             "Total Area Analyzed": round(region_area, 2),
             "Total Cells": int(total_cells),
             "Region Area (\u03bcm\u00b2)": round(region_area, 2),
-            "% CD3+ Cells": round(rng.uniform(0, 60), 2),
-            "% CD4+ Cells": round(rng.uniform(0, 40), 2),
-            "% CD8+ Cells": round(rng.uniform(0, 40), 2),
+            "% CD3+ Cells": round(min(rng.uniform(0, 60) * mult, 95), 2),
+            "% CD4+ Cells": round(min(rng.uniform(0, 40) * mult, 70), 2),
+            "% CD8+ Cells": round(min(rng.uniform(0, 40) * mult, 70), 2),
             "% CD20+ Cells": round(rng.uniform(0, 25), 2),
             "% CD68+ Cells": round(rng.uniform(0, 40), 2),
-            "% PD-L1+ Cells": round(rng.uniform(0, 45), 2),
-            "CD3 H-Score": round(rng.uniform(0, 300), 1),
+            "% PD-L1+ Cells": round(max(rng.uniform(0, 45) / mult, 0), 2),
+            "CD3 H-Score": round(rng.uniform(0, 300) * mult, 1),
             "DAPI Nucleus Intensity": round(rng.lognormal(5.0, 0.3), 2),
         })
 
