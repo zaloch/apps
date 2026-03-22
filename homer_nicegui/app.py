@@ -66,52 +66,40 @@ body, .q-page, .nicegui-content {
     font-family: 'Inter', sans-serif !important;
 }
 
-/* ── Header ─────────────────────────────────────────────────────────────── */
+/* ── Header (minimal bar) ──────────────────────────────────────────────── */
 .homer-header {
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
-    padding: 1.5rem 2.5rem;
-    border-radius: 14px;
-    color: white;
-    margin-bottom: 1rem;
-    position: relative;
-    overflow: hidden;
-    border: 1px solid rgba(99, 179, 237, 0.12);
-}
-.homer-header::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, #4FC3F7, #7C4DFF, #4FC3F7);
-    border-radius: 14px 14px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.15rem 1rem;
+    margin: 0;
+    border-bottom: 1px solid rgba(99, 179, 237, 0.08);
+    background: #0f172a;
 }
 .homer-header h1 {
     margin: 0;
-    font-size: 1.8rem;
+    font-size: 0.9rem;
     font-weight: 800;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
     background: linear-gradient(135deg, #4FC3F7, #81D4FA);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 .homer-header p {
-    margin: 0.2rem 0 0 0;
-    font-size: 0.85rem;
-    color: #94a3b8;
+    margin: 0;
+    font-size: 0.6rem;
+    color: #64748b;
     font-weight: 400;
-    letter-spacing: 0.02em;
 }
 .homer-header .version-tag {
-    position: absolute;
-    top: 1rem;
-    right: 1.8rem;
-    background: rgba(99, 179, 237, 0.1);
+    background: rgba(99, 179, 237, 0.08);
     color: #4FC3F7;
-    padding: 0.15rem 0.6rem;
-    border-radius: 20px;
-    font-size: 0.65rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 6px;
+    font-size: 0.5rem;
     font-weight: 600;
-    border: 1px solid rgba(99, 179, 237, 0.2);
+    border: 1px solid rgba(99, 179, 237, 0.1);
+    margin-left: auto;
 }
 
 /* ── Data Badges ────────────────────────────────────────────────────────── */
@@ -654,91 +642,91 @@ def main_content():
                 ui.html(f'<div class="metric-card"><div class="value">{value}</div><div class="label">{label}</div></div>')
 
     with ui.tabs().classes("w-full") as tabs:
-        plot_tab = ui.tab("Plot Builder", icon="bar_chart")
+        table_tab = ui.tab("Data Table", icon="table_chart")
         metadata_tab = ui.tab("Metadata", icon="biotech")
         process_tab = ui.tab("Processing", icon="cleaning_services")
-        table_tab = ui.tab("Data Table", icon="table_chart")
         stats_tab = ui.tab("Statistics", icon="analytics")
+        plot_tab = ui.tab("Plot Builder", icon="bar_chart")
+        multi_plot_tab = ui.tab("Multi Plot", icon="dashboard")
         report_tab = ui.tab("Report", icon="picture_as_pdf")
 
-    with ui.tab_panels(tabs, value=plot_tab).classes("w-full"):
+    with ui.tab_panels(tabs, value=table_tab).classes("w-full"):
 
         # ── Plot Builder ─────────────────────────────────────────────
         with ui.tab_panel(plot_tab):
-            with ui.row().classes("w-full gap-4"):
-                with ui.column().classes("w-80 shrink-0"):
-                    with ui.card().classes("w-full p-4").style(
-                        "background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); "
-                        "border: 1px solid rgba(99, 179, 237, 0.1); border-radius: 12px;"
-                    ):
-                        ui.label("Plot Configuration").classes("text-lg font-bold mb-2").style("color: #e2e8f0;")
+            # Plot area (full width, top)
+            plot_display = ui.column().classes("w-full")
+            with plot_display:
+                ui.label("Configure and click Generate to see your plot here.").classes("text-gray-400 text-center mt-4")
 
-                        plot_type_sel = ui.select(PLOT_TYPES, label="Plot Type", value="Bar Chart").classes("w-full")
+            # Download / report row
+            with ui.row().classes("w-full gap-2 mt-1"):
+                ui.button("PNG", on_click=download_png, color="secondary").props("dense")
+                ui.button("SVG", on_click=download_svg, color="secondary").props("dense")
 
-                        x_options = grouping_cols + numeric_cols
-                        y_options = numeric_cols
-                        color_options = ["(None)"] + grouping_cols
+                # title_input defined below but referenced here via closure
+                title_ref = {"value": ""}
+                ui.button("Add to Report",
+                          on_click=lambda: add_to_report(title_ref["value"]),
+                          color="accent").props("dense")
 
-                        x_sel = ui.select(x_options, label="X Axis",
-                                          value=x_options[0] if x_options else None).classes("w-full")
-                        y_sel = ui.select(y_options, label="Y Axis",
-                                          value=y_options[0] if y_options else None).classes("w-full")
-                        color_sel = ui.select(color_options, label="Color / Group By",
-                                              value="(None)").classes("w-full")
+            # Collapsible config panel
+            with ui.expansion("Plot Configuration", icon="tune", value=True).classes("w-full mt-2"):
+                x_options = grouping_cols + numeric_cols
+                y_options = numeric_cols
+                color_options = ["(None)"] + grouping_cols
 
-                        # Pairplot columns
+                with ui.row().classes("w-full gap-4"):
+                    plot_type_sel = ui.select(PLOT_TYPES, label="Plot Type", value="Bar Chart").classes("w-48")
+                    x_sel = ui.select(x_options, label="X Axis",
+                                      value=x_options[0] if x_options else None).classes("flex-1")
+                    y_sel = ui.select(y_options, label="Y Axis",
+                                      value=y_options[0] if y_options else None).classes("flex-1")
+                    color_sel = ui.select(color_options, label="Color / Group",
+                                          value="(None)").classes("w-48")
+
+                with ui.row().classes("w-full gap-4"):
+                    title_input = ui.input("Chart Title", value="").classes("flex-1")
+                    title_input.on("update:model-value", lambda e: title_ref.update({"value": e.args}))
+                    agg_sel = ui.select(["mean", "median", "sum", "count"],
+                                        label="Aggregation", value="mean").classes("w-40")
+                    orient_sel = ui.select(["v", "h"], label="Orient", value="v").classes("w-24")
+                    barmode_sel = ui.select(["group", "overlay"], label="Bar Mode", value="group").classes("w-32")
+
+                with ui.expansion("More Options", icon="settings").classes("w-full"):
+                    with ui.row().classes("w-full gap-4"):
+                        normalize_cb = ui.checkbox("Normalize to 100%", value=False)
+                        trendline_sel = ui.select([None, "ols", "lowess"], label="Trendline", value=None).classes("w-40")
+                        points_sel = ui.select(["outliers", "all", "suspectedoutliers"],
+                                                label="Show Points", value="outliers").classes("w-40")
+                        nbins_slider = ui.slider(min=10, max=200, value=50).props("label").classes("w-48")
+                        ui.label("Bins").classes("text-xs")
+
+                    # Pairplot / Sample Overview
+                    with ui.row().classes("w-full gap-4"):
                         default_pair = phenotype_cols[:5] if phenotype_cols else numeric_cols[:5]
                         pair_sel = ui.select(numeric_cols, multiple=True, label="Pairplot Columns",
-                                             value=default_pair).classes("w-full")
-
-                        # Sample overview
+                                             value=default_pair).classes("flex-1")
                         sample_col_sel = ui.select(grouping_cols, label="Sample Column",
-                                                    value="Sample ID" if "Sample ID" in grouping_cols else (grouping_cols[0] if grouping_cols else None)).classes("w-full")
+                                                    value="Sample ID" if "Sample ID" in grouping_cols else (grouping_cols[0] if grouping_cols else None)).classes("w-48")
                         overview_sel = ui.select(numeric_cols, multiple=True, label="Overview Metrics",
-                                                  value=phenotype_cols[:4] if phenotype_cols else numeric_cols[:4]).classes("w-full")
+                                                  value=phenotype_cols[:4] if phenotype_cols else numeric_cols[:4]).classes("flex-1")
 
-                        title_input = ui.input("Chart Title", value="").classes("w-full")
+                def on_generate():
+                    title_ref["value"] = title_input.value
+                    generate_plot(
+                        plot_type_sel.value, x_sel.value, y_sel.value,
+                        color_sel.value, title_input.value,
+                        orient_sel.value, barmode_sel.value,
+                        normalize_cb.value, trendline_sel.value,
+                        points_sel.value, int(nbins_slider.value),
+                        agg_sel.value, plot_display,
+                        pair_cols=pair_sel.value,
+                        sample_col=sample_col_sel.value,
+                        overview_metrics=overview_sel.value,
+                    )
 
-                        with ui.expansion("Advanced Options", icon="settings").classes("w-full"):
-                            orient_sel = ui.select(["v", "h"], label="Orientation", value="v").classes("w-full")
-                            barmode_sel = ui.select(["group", "overlay"], label="Bar Mode", value="group").classes("w-full")
-                            normalize_cb = ui.checkbox("Normalize to 100%", value=False)
-                            trendline_sel = ui.select([None, "ols", "lowess"], label="Trendline", value=None).classes("w-full")
-                            points_sel = ui.select(["outliers", "all", "suspectedoutliers"],
-                                                    label="Show Points", value="outliers").classes("w-full")
-                            nbins_slider = ui.slider(min=10, max=200, value=50).props("label")
-                            ui.label("Number of bins").classes("text-xs")
-                            agg_sel = ui.select(["mean", "median", "sum", "count"],
-                                                label="Aggregation", value="mean").classes("w-full")
-
-                        plot_container_ref = ui.column().classes("hidden")
-
-                        def on_generate():
-                            generate_plot(
-                                plot_type_sel.value, x_sel.value, y_sel.value,
-                                color_sel.value, title_input.value,
-                                orient_sel.value, barmode_sel.value,
-                                normalize_cb.value, trendline_sel.value,
-                                points_sel.value, int(nbins_slider.value),
-                                agg_sel.value, plot_display,
-                                pair_cols=pair_sel.value,
-                                sample_col=sample_col_sel.value,
-                                overview_metrics=overview_sel.value,
-                            )
-
-                        ui.button("Generate Plot", on_click=on_generate, color="primary").classes("w-full mt-2")
-
-                        with ui.row().classes("w-full gap-2 mt-2"):
-                            ui.button("PNG", on_click=download_png, color="secondary").classes("flex-1").props("dense")
-                            ui.button("SVG", on_click=download_svg, color="secondary").classes("flex-1").props("dense")
-                            ui.button("Add to Report",
-                                      on_click=lambda: add_to_report(title_input.value),
-                                      color="accent").classes("flex-1").props("dense")
-
-                with ui.column().classes("flex-1 min-w-0"):
-                    plot_display = ui.column().classes("w-full")
-                    with plot_display:
-                        ui.label("Configure and generate a plot to see it here.").classes("text-gray-400 text-center mt-8")
+                ui.button("Generate Plot", on_click=on_generate, color="primary").classes("w-full mt-2")
 
         # ── Metadata & Aggregation ──────────────────────────────────
         with ui.tab_panel(metadata_tab):
@@ -1067,30 +1055,210 @@ def main_content():
                 clean_pheno = get_phenotype_columns(ds, include_weak_strong=False)
                 ui.label(", ".join(clean_pheno[:15])).classes("text-sm text-gray-600")
 
+        # ── Multi Plot Builder ─────────────────────────────────────────
+        with ui.tab_panel(multi_plot_tab):
+            ui.label("Multi Plot Builder").classes("text-lg font-bold")
+            ui.label("Generate multiple plots at once — each Y metric becomes a separate plot.").classes("text-sm text-gray-500 mb-2")
+
+            multi_plot_container = ui.column().classes("w-full")
+
+            with ui.row().classes("w-full gap-4"):
+                multi_type_sel = ui.select(PLOT_TYPES, label="Plot Type", value="Bar Chart").classes("w-48")
+                multi_x_sel = ui.select(
+                    grouping_cols + numeric_cols, label="X / Grouping",
+                    value=grouping_cols[0] if grouping_cols else (numeric_cols[0] if numeric_cols else None),
+                ).classes("w-48")
+                multi_color_sel = ui.select(
+                    ["(None)"] + grouping_cols, label="Color / Group",
+                    value="(None)",
+                ).classes("w-48")
+                multi_agg_sel = ui.select(["mean", "median", "sum", "count"],
+                                           label="Aggregation", value="mean").classes("w-40")
+
+            with ui.row().classes("w-full gap-4"):
+                default_multi_y = phenotype_cols[:6] if phenotype_cols else numeric_cols[:6]
+                multi_y_sel = ui.select(numeric_cols, multiple=True, label="Y Metrics (one plot each)",
+                                         value=default_multi_y).classes("flex-1")
+                multi_grid_sel = ui.select([1, 2, 3, 4], label="Grid columns", value=2).classes("w-32")
+
+            def gen_multi_plots():
+                if not multi_y_sel.value:
+                    ui.notify("Select at least one Y metric", type="warning")
+                    return
+                color = multi_color_sel.value if multi_color_sel.value != "(None)" else None
+                figs = []
+                for y_col in multi_y_sel.value:
+                    title = f"{multi_type_sel.value}: {y_col}"
+                    # Use generate_plot logic inline
+                    plot_df = filtered_df.copy()
+                    if multi_type_sel.value in ("Bar Chart", "Stacked Bar Chart") and y_col and multi_x_sel.value:
+                        gcols = [multi_x_sel.value]
+                        if color:
+                            gcols.append(color)
+                        plot_df = plot_df.groupby(gcols, as_index=False)[y_col].agg(multi_agg_sel.value)
+                    fig = None
+                    try:
+                        if multi_type_sel.value == "Bar Chart":
+                            fig = create_bar_chart(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                        elif multi_type_sel.value == "Box Plot":
+                            fig = create_box_plot(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                        elif multi_type_sel.value == "Violin Plot":
+                            fig = create_violin_plot(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                        elif multi_type_sel.value == "Strip Plot":
+                            fig = create_strip_plot(plot_df, multi_x_sel.value or "index", y_col, color=color, title=title)
+                        elif multi_type_sel.value == "Histogram":
+                            fig = create_histogram(plot_df, y_col, color=color, title=title)
+                        elif multi_type_sel.value == "Scatter Plot":
+                            fig = create_scatter_plot(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                        else:
+                            fig = create_bar_chart(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                    except Exception:
+                        pass
+                    if fig:
+                        figs.append({"title": title, "fig": fig})
+                        state.report_figures.append({"title": title, "fig": fig})
+
+                # Display grid
+                grid_c = int(multi_grid_sel.value)
+                multi_plot_container.clear()
+                with multi_plot_container:
+                    for row_start in range(0, len(figs), grid_c):
+                        row_items = figs[row_start:row_start + grid_c]
+                        with ui.row().classes("w-full gap-2"):
+                            for item in row_items:
+                                with ui.column().classes("flex-1 min-w-0"):
+                                    ui.plotly(item["fig"]).classes("w-full")
+
+                ui.notify(
+                    f"Generated {len(figs)} plots, all added to Report ({len(state.report_figures)} total)",
+                    type="positive",
+                )
+
+            ui.button("Generate All Plots", on_click=gen_multi_plots, color="primary").classes("mt-2")
+
         # ── Report ───────────────────────────────────────────────────
         with ui.tab_panel(report_tab):
-            ui.label(f"Report contains {len(state.report_figures)} figure(s)").classes("text-lg")
-            ui.label("Add figures via 'Add to Report' in Plot Builder.").classes("text-sm text-gray-500")
+            n_figs = len(state.report_figures)
+            ui.label("Report").classes("text-lg font-bold")
 
-            report_title_input = ui.input("Report Title", value="Homer Data Report").classes("w-96 mt-4")
+            with ui.row().classes("w-full gap-4"):
+                report_title_input = ui.input("Report Title", value="Homer Data Report").classes("flex-1")
+                report_grid_sel = ui.select([1, 2, 3, 4], label="PPTX Grid Cols", value=2).classes("w-40")
+                report_table_cb = ui.checkbox("Include data table", value=True)
 
-            with ui.row().classes("gap-4 mt-4"):
-                ui.button("Generate PDF Report",
+            ui.label(
+                f"Report contains {n_figs} figure(s). "
+                "Add via Plot Builder, Multi Plot, or Auto-Generate below."
+            ).classes("text-sm text-gray-500 mt-2")
+
+            # Auto-generate section
+            ui.separator()
+            ui.label("Auto-Generate Report").classes("text-md font-bold mt-2")
+            ui.label("Automatically create plots for all metrics and export.").classes("text-sm text-gray-500")
+
+            with ui.row().classes("w-full gap-4"):
+                auto_color_sel = ui.select(
+                    ["(None)"] + grouping_cols, label="Color / Group",
+                    value="(None)",
+                ).classes("w-48")
+                auto_types_sel = ui.select(
+                    ["Bar Chart", "Box Plot", "Violin Plot", "Strip Plot", "Histogram"],
+                    multiple=True, label="Plot types",
+                    value=["Bar Chart", "Box Plot"],
+                ).classes("flex-1")
+
+            def auto_generate():
+                color = auto_color_sel.value if auto_color_sel.value != "(None)" else None
+                x_col = None
+                for candidate in ["Treatment Group", "Genotype", "Analysis Region", "Sample ID"]:
+                    if candidate in grouping_cols:
+                        x_col = candidate
+                        break
+                if not x_col and grouping_cols:
+                    x_col = grouping_cols[0]
+
+                targets = phenotype_cols if phenotype_cols else numeric_cols[:12]
+                new_figs = []
+                for pt in auto_types_sel.value:
+                    for y_col in targets:
+                        title = f"{pt}: {y_col}"
+                        plot_df = filtered_df.copy()
+                        fig = None
+                        try:
+                            if pt in ("Bar Chart",) and x_col:
+                                gcols = [x_col]
+                                if color:
+                                    gcols.append(color)
+                                agg_df = plot_df.groupby(gcols, as_index=False)[y_col].agg("mean")
+                                fig = create_bar_chart(agg_df, x_col, y_col, color=color, title=title)
+                            elif pt == "Box Plot" and x_col:
+                                fig = create_box_plot(plot_df, x_col, y_col, color=color, title=title)
+                            elif pt == "Violin Plot" and x_col:
+                                fig = create_violin_plot(plot_df, x_col, y_col, color=color, title=title)
+                            elif pt == "Strip Plot" and x_col:
+                                fig = create_strip_plot(plot_df, x_col, y_col, color=color, title=title)
+                            elif pt == "Histogram":
+                                fig = create_histogram(plot_df, y_col, color=color, title=title)
+                        except Exception:
+                            pass
+                        if fig:
+                            new_figs.append({"title": title, "fig": fig})
+
+                state.report_figures.extend(new_figs)
+                ui.notify(
+                    f"Generated {len(new_figs)} plots. Report now has {len(state.report_figures)} figures.",
+                    type="positive",
+                )
+                main_content.refresh()
+
+            ui.button("Auto-Generate All Plots", on_click=auto_generate, color="primary").classes("mt-2")
+
+            # Export buttons
+            ui.separator()
+            ui.label("Export").classes("text-md font-bold mt-2")
+            with ui.row().classes("gap-4 mt-2"):
+                def download_pptx():
+                    if not state.report_figures:
+                        ui.notify("No figures in report", type="warning")
+                        return
+                    try:
+                        builder = ReportBuilder(
+                            title=report_title_input.value,
+                            dataset_name=ds.filename,
+                        )
+                        for entry in state.report_figures:
+                            builder.add_figure(entry["title"], entry["fig"])
+                        pptx_bytes = builder.generate_pptx(
+                            grid_cols=int(report_grid_sel.value),
+                            include_data_table=report_table_cb.value,
+                            df=filtered_df,
+                        )
+                        b64 = base64.b64encode(pptx_bytes).decode()
+                        ui.download(
+                            src=f"data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,{b64}",
+                            filename="homer_report.pptx",
+                        )
+                        ui.notify("PPTX downloaded!", type="positive")
+                    except Exception as ex:
+                        ui.notify(f"PPTX failed: {ex}", type="negative")
+
+                ui.button("Generate PPTX", on_click=download_pptx, color="primary")
+                ui.button("Generate PDF",
                           on_click=lambda: download_report(report_title_input.value),
-                          color="primary").props("" if state.report_figures else "disable")
+                          color="secondary")
+                ui.button("Download Data CSV", on_click=download_filtered_csv, color="secondary")
 
                 def clear_report():
                     state.report_figures.clear()
                     ui.notify("Report cleared", type="info")
                     main_content.refresh()
 
-                ui.button("Clear Report", on_click=clear_report, color="secondary")
+                ui.button("Clear All Figures", on_click=clear_report, color="secondary")
 
             if state.report_figures:
-                ui.separator()
-                ui.label("Figures in report:").classes("font-bold mt-2")
-                for i, entry in enumerate(state.report_figures):
-                    ui.label(f"  {i+1}. {entry['title']}").classes("text-sm")
+                with ui.expansion(f"Figures in report ({n_figs})", icon="list").classes("w-full mt-2"):
+                    for i, entry in enumerate(state.report_figures):
+                        ui.label(f"  {i+1}. {entry['title']}").classes("text-sm")
 
 
 # ── Main Page ────────────────────────────────────────────────────────────────
@@ -1099,16 +1267,16 @@ def main_content():
 def index():
     ui.html(HOMER_CSS)
 
-    with ui.header().classes("bg-transparent shadow-none p-0"):
-        ui.html("""
-        <div class="homer-header">
-            <h1>HOMER</h1>
-            <p>Histology Output Mapper &amp; Explorer for Research</p>
-            <span class="version-tag">v1.0</span>
-        </div>
-        """)
+    with ui.header().classes("shadow-none p-0 m-0").style("background: #0f172a; min-height: 0;"):
+        ui.html(
+            '<div class="homer-header">'
+            '<h1>HOMER</h1>'
+            '<p>Histology Output Mapper &amp; Explorer for Research</p>'
+            '<span class="version-tag">v1.0</span>'
+            '</div>'
+        )
 
-    with ui.left_drawer(value=True).classes("p-4").style("background: #0f172a;"):
+    with ui.left_drawer(value=False).classes("p-4").style("background: #0f172a;"):
         ui.html('<div class="sidebar-section-title">Data Upload</div>')
 
         force_type_select = ui.select(
