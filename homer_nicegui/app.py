@@ -1,6 +1,6 @@
-# Homer - Halo Output Mapper & Explorer for Research (NiceGUI Version)
-# A data dashboard for HALO by Indica Labs image analysis data
-# Aligned with anima/HaloAnalysis workflows and column conventions
+# Homer - Histology Output Mapper & Explorer for Research (NiceGUI Version)
+# A data dashboard for histology image analysis data
+# Aligned with anima/HistologyAnalysis workflows and column conventions
 __author__ = "Gonzalo Zeballos"
 __license__ = "GNU GPLv3"
 __version__ = "1.0"
@@ -18,10 +18,10 @@ import base64
 import tempfile
 
 from homer_core.data_parser import (
-    load_uploaded_file, load_file, parse_halo_data, apply_filters,
+    load_uploaded_file, load_file, parse_histology_data, apply_filters,
     get_filterable_columns, get_plottable_numeric_columns, get_grouping_columns,
     get_phenotype_columns, dezero, remove_outliers, sample_for_plotting,
-    get_memory_usage_mb, HaloDataset, MAX_INTERACTIVE_ROWS,
+    get_memory_usage_mb, HistologyDataset, MAX_INTERACTIVE_ROWS,
 )
 from homer_core.plotting import (
     create_bar_chart, create_stacked_bar_chart, create_scatter_plot,
@@ -45,7 +45,7 @@ from homer_core.metadata import (
 
 class AppState:
     def __init__(self):
-        self.dataset: HaloDataset | None = None
+        self.dataset: HistologyDataset | None = None
         self.filters: dict = {}
         self.report_figures: list[dict] = []
         self.plot_counter: int = 0
@@ -275,7 +275,7 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
         elif "Cluster" in force_val:
             ft = "cluster"
 
-        state.dataset = parse_halo_data(
+        state.dataset = parse_histology_data(
             df, filename, force_type=ft, max_job=max_job_cb.value,
             file_size_mb=actual_file_size_mb, total_rows=total_rows,
         )
@@ -294,13 +294,13 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
 def load_demo(demo_type: str, n_samples: int = 8, n_objects: int = 5000):
     if demo_type == "object":
         df = generate_object_data(n_cells=n_objects, n_images=n_samples)
-        state.dataset = parse_halo_data(df, "demo_object_data.csv", force_type="object")
+        state.dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
     elif demo_type == "summary":
         df = generate_summary_data(n_images=n_samples)
-        state.dataset = parse_halo_data(df, "demo_summary_data.csv")
+        state.dataset = parse_histology_data(df, "demo_summary_data.csv")
     elif demo_type == "cluster":
         df = generate_cluster_data(n_clusters=n_objects, n_images=n_samples)
-        state.dataset = parse_halo_data(df, "demo_cluster_data.csv", force_type="cluster")
+        state.dataset = parse_histology_data(df, "demo_cluster_data.csv", force_type="cluster")
     state.filters = {}
     ui.notify(f"Loaded {demo_type} demo data ({n_samples} samples)", type="positive")
     main_content.refresh()
@@ -541,8 +541,8 @@ def main_content():
             <div class="getting-started-grid">
                 <div class="gs-card">
                     <div class="gs-icon">📂</div>
-                    <h4>Upload HALO Data</h4>
-                    <p>Import CSV, TSV, or Excel files exported from HALO. Auto-detects object, summary, or cluster data types.</p>
+                    <h4>Upload Histology Data</h4>
+                    <p>Import CSV, TSV, or Excel files exported from histology software. Auto-detects object, summary, or cluster data types.</p>
                 </div>
                 <div class="gs-card">
                     <div class="gs-icon">🧪</div>
@@ -805,7 +805,7 @@ def main_content():
                         def do_merge():
                             try:
                                 merged_df = merge_metadata(filtered_df, meta)
-                                state.dataset = parse_halo_data(
+                                state.dataset = parse_histology_data(
                                     merged_df, ds.filename,
                                     force_type=ds.data_type,
                                     file_size_mb=ds.file_size_mb,
@@ -822,7 +822,7 @@ def main_content():
                             except Exception as ex:
                                 ui.notify(f"Merge failed: {ex}", type="negative")
 
-                        ui.button("Merge Metadata into HALO Data",
+                        ui.button("Merge Metadata into Histology Data",
                                   on_click=do_merge, color="primary").classes("w-full mt-4")
                     else:
                         ui.label("No Metadata Loaded").classes("text-lg font-bold")
@@ -888,7 +888,7 @@ def main_content():
 
                             with ui.row().classes("gap-4 mt-4"):
                                 def use_agg():
-                                    state.dataset = parse_halo_data(
+                                    state.dataset = parse_histology_data(
                                         state.aggregated_df,
                                         f"{ds.filename}_aggregated",
                                         force_type="summary",
@@ -927,7 +927,7 @@ def main_content():
                         before = len(filtered_df)
                         cleaned = dezero(filtered_df, dezero_sel.value)
                         removed = before - len(cleaned)
-                        state.dataset = parse_halo_data(cleaned, ds.filename, force_type=ds.data_type)
+                        state.dataset = parse_histology_data(cleaned, ds.filename, force_type=ds.data_type)
                         state.filters = {}
                         ui.notify(f"Removed {removed} rows. {len(cleaned)} remaining.", type="positive")
                         main_content.refresh()
@@ -966,7 +966,7 @@ def main_content():
                             method=out_method_sel.value, factor=iqr_factor.value,
                             std_factor=iqr_factor.value,
                         )
-                        state.dataset = parse_halo_data(cleaned, ds.filename, force_type=ds.data_type)
+                        state.dataset = parse_histology_data(cleaned, ds.filename, force_type=ds.data_type)
                         state.filters = {}
                         ui.notify(f"Applied. {len(cleaned)} rows remaining.", type="positive")
                         main_content.refresh()
@@ -1074,7 +1074,7 @@ def index():
         ui.html("""
         <div class="homer-header">
             <h1>HOMER</h1>
-            <p>Halo Output Mapper &amp; Explorer for Research</p>
+            <p>Histology Output Mapper &amp; Explorer for Research</p>
             <span class="version-tag">v1.0</span>
         </div>
         """)
@@ -1090,7 +1090,7 @@ def index():
         max_job_cb = ui.checkbox("Latest Job Id only", value=False)
 
         ui.upload(
-            label="Upload HALO data file",
+            label="Upload histology data file",
             auto_upload=True,
             on_upload=lambda e: handle_upload(e, force_type_select, max_job_cb),
         ).classes("w-full").props('accept=".csv,.tsv,.txt,.xlsx,.xls"')
@@ -1117,11 +1117,11 @@ def index():
         "background: linear-gradient(180deg, transparent, #0f172a); "
         "border-top: 1px solid rgba(99, 179, 237, 0.08);"
     ):
-        ui.label("Homer v1.0  ·  HALO Data Dashboard  ·  Built with NiceGUI").classes("text-xs").style("color: #475569;")
+        ui.label("Homer v1.0  ·  Histology Data Dashboard  ·  Built with NiceGUI").classes("text-xs").style("color: #475569;")
 
 
 ui.run(
-    title="Homer - Halo Data Dashboard",
+    title="Homer - Histology Data Dashboard",
     port=int(os.environ.get("PORT", 8080)),
     host=os.environ.get("HOST", "0.0.0.0"),
     reload=os.environ.get("HOMER_DEV", "").lower() in ("1", "true"),

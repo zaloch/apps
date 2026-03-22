@@ -1,5 +1,5 @@
-# Homer - Data Parser for HALO by Indica Labs output files
-# Aligned with anima/HaloAnalysis column patterns and real HALO object/summary exports
+# Homer - Data Parser for histology image analysis output files
+# Aligned with anima/HistologyAnalysis column patterns and real histology object/summary exports
 # Handles CSV, TSV, and Excel files with auto-detection of object vs summary data
 # Supports large files (100MB - 3GB) via chunked reading and intelligent sampling
 
@@ -22,17 +22,17 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class HaloDataset:
-    """Container for parsed HALO data with metadata.
-    Column classification mirrors HaloAnalysis.set_analysis_metrics() and
-    the real HALO object export format (Image Location, Object Id, per-channel metrics)."""
+class HistologyDataset:
+    """Container for parsed histology data with metadata.
+    Column classification mirrors HistologyAnalysis.set_analysis_metrics() and
+    the real histology object export format (Image Location, Object Id, per-channel metrics)."""
     df: pd.DataFrame
     data_type: str  # "object", "summary", or "cluster"
     filename: str
     # Core column groups (matching anima naming)
     numeric_columns: list = field(default_factory=list)
     categorical_columns: list = field(default_factory=list)
-    # HALO-specific column groups (summary data)
+    # Histology-specific column groups (summary data)
     intensity_columns: list = field(default_factory=list)      # H-Score, *Intensity, *Cell Intensity
     spatial_columns: list = field(default_factory=list)         # non-cell numeric (area, coords, etc.)
     cell_columns: list = field(default_factory=list)            # columns with "Cells"
@@ -58,7 +58,7 @@ class HaloDataset:
     annotation_columns: list = field(default_factory=list)
     # Detected fluorophore channels
     fluorophore_channels: list = field(default_factory=list)  # e.g. ["DAPI", "Cy5", "5-FAM", "Spectrum Aqua", "Rhodamine 6G"]
-    # HALO metadata
+    # Histology metadata
     algorithm_names: list = field(default_factory=list)
     sample_ids: list = field(default_factory=list)
     analysis_regions: list = field(default_factory=list)
@@ -76,7 +76,7 @@ class HaloDataset:
         return list(self.df.columns)
 
 
-# ── Known HALO fluorophore/channel names ─────────────────────────────────────
+# ── Known histology fluorophore/channel names ─────────────────────────────────────
 
 KNOWN_FLUOROPHORES = [
     "DAPI", "Cy5", "5-FAM", "Spectrum Aqua", "Spectrum Orange",
@@ -89,7 +89,7 @@ KNOWN_FLUOROPHORES = [
 
 # ── Column pattern definitions ───────────────────────────────────────────────
 
-# Patterns indicating object-level data (per-object exports from HALO)
+# Patterns indicating object-level data (per-object exports from histology software)
 OBJECT_INDICATOR_PATTERNS = [
     "object id", "cell id",
     "image location",
@@ -105,7 +105,7 @@ OBJECT_INDICATOR_PATTERNS = [
     "classifier label",
 ]
 
-# Patterns indicating summary-level data (HALO analysis output)
+# Patterns indicating summary-level data (histology analysis output)
 SUMMARY_INDICATOR_PATTERNS = [
     "image tag", "job id",
     "total cells", "total objects", "num cells",
@@ -237,7 +237,7 @@ def _get_file_size_mb(filepath: str) -> float:
 
 def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     """Downcast numeric columns to reduce memory usage.
-    Typically saves 40-60% memory on large HALO exports."""
+    Typically saves 40-60% memory on large histology exports."""
     for col in df.select_dtypes(include=["int64"]).columns:
         col_min, col_max = df[col].min(), df[col].max()
         if col_min >= 0 and col_max <= 255:
@@ -534,7 +534,7 @@ def _match_patterns(column_name: str, patterns: list[str]) -> bool:
 def detect_data_type(df: pd.DataFrame) -> str:
     """Auto-detect whether the data is object-level, summary-level, or cluster-level.
 
-    Uses column name heuristics aligned with real HALO export conventions.
+    Uses column name heuristics aligned with real histology export conventions.
     Object data: Image Location, Object Id, XMin/YMin, per-channel metrics, phenotype combos
     Summary data: Image Tag, Job Id, Total Cells, % columns, H-Score
     """
@@ -711,10 +711,10 @@ def classify_columns(df: pd.DataFrame, data_type: str) -> dict:
     }
 
 
-# ── HALO-specific preprocessing ─────────────────────────────────────────────
+# ── Histology-specific preprocessing ────────────────────────────────────────
 
-def preprocess_halo_summary(df: pd.DataFrame, max_job: bool = False) -> pd.DataFrame:
-    """Preprocess a HALO summary file (same as HaloAnalysis.parse_halo_analysis).
+def preprocess_histology_summary(df: pd.DataFrame, max_job: bool = False) -> pd.DataFrame:
+    """Preprocess a histology summary file (same as HistologyAnalysis.parse_histology_analysis).
 
     - Creates 'Sample ID' from 'Image Tag' (strips .scn)
     - Optionally keeps only the latest Job Id per Sample/Algorithm
@@ -748,7 +748,7 @@ def preprocess_halo_summary(df: pd.DataFrame, max_job: bool = False) -> pd.DataF
 
 def dezero(df: pd.DataFrame, metric: str = "Total Cells") -> pd.DataFrame:
     """Remove rows with zero values in the given metric.
-    Clusters with 0 cells are noise (mirrors HaloMunger.dezero)."""
+    Clusters with 0 cells are noise (mirrors HistologyMunger.dezero)."""
     if metric in df.columns:
         return df[df[metric] > 0].copy()
     return df.copy()
@@ -873,7 +873,7 @@ def get_memory_usage_mb(df: pd.DataFrame) -> float:
     return df.memory_usage(deep=True).sum() / (1024 * 1024)
 
 
-def parse_halo_data(
+def parse_histology_data(
     df: pd.DataFrame,
     filename: str = "unknown",
     force_type: Optional[str] = None,
@@ -881,15 +881,15 @@ def parse_halo_data(
     analysis_area: Optional[str] = None,
     file_size_mb: float = 0.0,
     total_rows: int = 0,
-) -> HaloDataset:
-    """Parse a DataFrame as HALO data, auto-detecting type and classifying columns.
+) -> HistologyDataset:
+    """Parse a DataFrame as histology data, auto-detecting type and classifying columns.
 
-    Handles both real HALO object exports (Image Location, Object Id, per-channel metrics,
+    Handles both real histology object exports (Image Location, Object Id, per-channel metrics,
     phenotype combos like DAPI+ C1+ C2+ C3+ C4+) and summary exports (Image Tag, Job Id,
     Total Cells, % columns, H-Score).
     """
     # Preprocess (derive Sample ID, filter max job)
-    df = preprocess_halo_summary(df, max_job=max_job)
+    df = preprocess_histology_summary(df, max_job=max_job)
 
     # Filter by analysis area if specified
     if analysis_area and "Analysis Region" in df.columns:
@@ -898,14 +898,14 @@ def parse_halo_data(
     data_type = force_type if force_type else detect_data_type(df)
     classified = classify_columns(df, data_type)
 
-    # Extract HALO metadata
+    # Extract histology metadata
     algorithm_names = df["Algorithm Name"].unique().tolist() if "Algorithm Name" in df.columns else []
     sample_ids = df["Sample ID"].unique().tolist() if "Sample ID" in df.columns else []
     analysis_regions = df["Analysis Region"].unique().tolist() if "Analysis Region" in df.columns else []
 
     is_sampled = total_rows > 0 and len(df) < total_rows
 
-    return HaloDataset(
+    return HistologyDataset(
         df=df,
         data_type=data_type,
         filename=filename,
@@ -944,7 +944,7 @@ def parse_halo_data(
 
 # ── Accessor helpers ─────────────────────────────────────────────────────────
 
-def get_filterable_columns(dataset: HaloDataset) -> list[str]:
+def get_filterable_columns(dataset: HistologyDataset) -> list[str]:
     """Return columns suitable for filtering (categorical + annotation)."""
     seen = set()
     result = []
@@ -955,13 +955,13 @@ def get_filterable_columns(dataset: HaloDataset) -> list[str]:
     return result
 
 
-def get_plottable_numeric_columns(dataset: HaloDataset) -> list[str]:
+def get_plottable_numeric_columns(dataset: HistologyDataset) -> list[str]:
     """Return numeric columns suitable for plotting (exclude IDs and phenotype combo binary cols)."""
     exclude = set(dataset.id_columns) | set(dataset.phenotype_combo_columns)
     return [c for c in dataset.numeric_columns if c not in exclude]
 
 
-def get_grouping_columns(dataset: HaloDataset) -> list[str]:
+def get_grouping_columns(dataset: HistologyDataset) -> list[str]:
     """Return columns suitable for grouping/coloring plots."""
     candidates = dataset.categorical_columns + dataset.annotation_columns
     seen = set()
@@ -973,7 +973,7 @@ def get_grouping_columns(dataset: HaloDataset) -> list[str]:
     return result
 
 
-def get_phenotype_columns(dataset: HaloDataset, include_weak_strong: bool = False) -> list[str]:
+def get_phenotype_columns(dataset: HistologyDataset, include_weak_strong: bool = False) -> list[str]:
     """Return phenotype fraction columns, optionally filtering out Weak/Strong/Moderate/Negative.
     Mirrors the broad_describe filtering from anima."""
     cols = dataset.phenotype_fraction_columns
@@ -984,7 +984,7 @@ def get_phenotype_columns(dataset: HaloDataset, include_weak_strong: bool = Fals
     return cols
 
 
-def get_per_channel_columns(dataset: HaloDataset, channel: str) -> dict:
+def get_per_channel_columns(dataset: HistologyDataset, channel: str) -> dict:
     """Get all columns for a specific fluorophore channel.
 
     Returns dict with keys: nucleus_intensity, cell_intensity, classification,
