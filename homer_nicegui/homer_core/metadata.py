@@ -1,7 +1,7 @@
 # Homer - Metadata Manager
 # Handles experimental metadata (Subject ID, Treatment, Genotype, Timepoint, etc.)
 # Supports both CSV upload and manual per-image entry
-# Merges metadata with HALO data and calculates per-image percentages from object data
+# Merges metadata with histology data and calculates per-image percentages from object data
 
 import pandas as pd
 import numpy as np
@@ -26,11 +26,11 @@ STANDARD_METADATA_FIELDS = [
     "Notes",
 ]
 
-# Common join keys between HALO data and metadata
-HALO_JOIN_KEYS = [
+# Common join keys between histology data and metadata
+HISTOLOGY_JOIN_KEYS = [
     "Sample ID",       # derived from Image Tag or Image Location
-    "Image Tag",       # raw HALO field
-    "Image Location",  # raw HALO field (full path)
+    "Image Tag",       # raw histology field
+    "Image Location",  # raw histology field (full path)
 ]
 
 
@@ -38,7 +38,7 @@ HALO_JOIN_KEYS = [
 class ExperimentMetadata:
     """Container for experimental metadata that maps images to experimental factors."""
     df: pd.DataFrame
-    join_key: str                  # column used to join with HALO data
+    join_key: str                  # column used to join with histology data
     factor_columns: list = field(default_factory=list)  # columns usable as plot groupings
     filename: str = ""
 
@@ -51,7 +51,7 @@ def load_metadata_csv(filepath_or_buffer, filename: str = "") -> ExperimentMetad
     Expected format: one row per image/sample with columns like:
     Sample ID, Subject ID, Treatment Group, Genotype, Day, Timepoint, ...
 
-    The first column that matches a known HALO join key is used as the merge key.
+    The first column that matches a known histology join key is used as the merge key.
     """
     if isinstance(filepath_or_buffer, str):
         df = pd.read_csv(filepath_or_buffer)
@@ -70,11 +70,11 @@ def load_metadata_csv(filepath_or_buffer, filename: str = "") -> ExperimentMetad
 
 
 def _detect_join_key(df: pd.DataFrame) -> str:
-    """Detect which column should be used to join metadata with HALO data."""
+    """Detect which column should be used to join metadata with histology data."""
     cols_lower = {c.lower().strip(): c for c in df.columns}
 
     # Priority order for join keys
-    for key in HALO_JOIN_KEYS:
+    for key in HISTOLOGY_JOIN_KEYS:
         if key.lower() in cols_lower:
             return cols_lower[key.lower()]
 
@@ -130,58 +130,58 @@ def metadata_template_csv(sample_ids: list[str]) -> str:
     return df.to_csv(index=False)
 
 
-# ── Merge metadata with HALO data ──────────────────────────────────────────
+# ── Merge metadata with histology data ──────────────────────────────────────────
 
 def merge_metadata(
-    halo_df: pd.DataFrame,
+    histology_df: pd.DataFrame,
     metadata: ExperimentMetadata,
 ) -> pd.DataFrame:
-    """Merge experimental metadata into the HALO dataframe.
+    """Merge experimental metadata into the histology dataframe.
 
     Joins on the detected join key. Metadata columns are added to each
-    matching row in the HALO data.
+    matching row in the histology data.
     """
     join_key = metadata.join_key
 
-    # Find the corresponding column in the HALO data
-    halo_join_col = _find_halo_join_column(halo_df, join_key)
-    if halo_join_col is None:
+    # Find the corresponding column in the histology data
+    histology_join_col = _find_histology_join_column(histology_df, join_key)
+    if histology_join_col is None:
         raise ValueError(
             f"Cannot find matching column for metadata key '{join_key}' "
-            f"in HALO data. Available columns: {list(halo_df.columns[:10])}"
+            f"in histology data. Available columns: {list(histology_df.columns[:10])}"
         )
 
     # Avoid duplicating columns that already exist
     meta_cols = [join_key] + [
         c for c in metadata.factor_columns
-        if c not in halo_df.columns
+        if c not in histology_df.columns
     ]
     meta_subset = metadata.df[meta_cols].drop_duplicates(subset=[join_key])
 
     # Merge
-    if halo_join_col == join_key:
-        merged = halo_df.merge(meta_subset, on=join_key, how="left")
+    if histology_join_col == join_key:
+        merged = histology_df.merge(meta_subset, on=join_key, how="left")
     else:
-        merged = halo_df.merge(
-            meta_subset, left_on=halo_join_col, right_on=join_key, how="left"
+        merged = histology_df.merge(
+            meta_subset, left_on=histology_join_col, right_on=join_key, how="left"
         )
 
     return merged
 
 
-def _find_halo_join_column(halo_df: pd.DataFrame, meta_key: str) -> Optional[str]:
-    """Find the HALO dataframe column that corresponds to the metadata join key."""
+def _find_histology_join_column(histology_df: pd.DataFrame, meta_key: str) -> Optional[str]:
+    """Find the histology dataframe column that corresponds to the metadata join key."""
     # Exact match
-    if meta_key in halo_df.columns:
+    if meta_key in histology_df.columns:
         return meta_key
 
     # Case-insensitive match
-    cols_lower = {c.lower().strip(): c for c in halo_df.columns}
+    cols_lower = {c.lower().strip(): c for c in histology_df.columns}
     if meta_key.lower() in cols_lower:
         return cols_lower[meta_key.lower()]
 
     # "Sample ID" is often derived from Image Tag/Location
-    if meta_key.lower() == "sample id" and "Sample ID" in halo_df.columns:
+    if meta_key.lower() == "sample id" and "Sample ID" in histology_df.columns:
         return "Sample ID"
 
     return None
@@ -206,7 +206,7 @@ def aggregate_object_data(
     - Morphology cols: calculate mean
     - Count total objects per group
 
-    This mirrors the HaloAnalysis aggregation workflow.
+    This mirrors the HistologyAnalysis aggregation workflow.
     """
     if not group_cols:
         raise ValueError("At least one grouping column is required")

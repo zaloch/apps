@@ -1,5 +1,5 @@
-# Homer - Data Parser for HALO by Indica Labs output files
-# Aligned with anima/HaloAnalysis column patterns and real HALO object/summary exports
+# Homer - Data Parser for histology image analysis output files
+# Aligned with anima/HistologyAnalysis column patterns and real histology object/summary exports
 # Handles CSV, TSV, and Excel files with auto-detection of object vs summary data
 # Supports large files (100MB - 3GB) via chunked reading and intelligent sampling
 
@@ -12,21 +12,27 @@ from dataclasses import dataclass, field
 from scipy.stats.mstats import winsorize as scipy_winsorize
 import logging
 
+try:
+    import dask.dataframe as dd
+    HAS_DASK = True
+except ImportError:
+    HAS_DASK = False
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class HaloDataset:
-    """Container for parsed HALO data with metadata.
-    Column classification mirrors HaloAnalysis.set_analysis_metrics() and
-    the real HALO object export format (Image Location, Object Id, per-channel metrics)."""
+class HistologyDataset:
+    """Container for parsed histology data with metadata.
+    Column classification mirrors HistologyAnalysis.set_analysis_metrics() and
+    the real histology object export format (Image Location, Object Id, per-channel metrics)."""
     df: pd.DataFrame
     data_type: str  # "object", "summary", or "cluster"
     filename: str
     # Core column groups (matching anima naming)
     numeric_columns: list = field(default_factory=list)
     categorical_columns: list = field(default_factory=list)
-    # HALO-specific column groups (summary data)
+    # Histology-specific column groups (summary data)
     intensity_columns: list = field(default_factory=list)      # H-Score, *Intensity, *Cell Intensity
     spatial_columns: list = field(default_factory=list)         # non-cell numeric (area, coords, etc.)
     cell_columns: list = field(default_factory=list)            # columns with "Cells"
@@ -52,7 +58,7 @@ class HaloDataset:
     annotation_columns: list = field(default_factory=list)
     # Detected fluorophore channels
     fluorophore_channels: list = field(default_factory=list)  # e.g. ["DAPI", "Cy5", "5-FAM", "Spectrum Aqua", "Rhodamine 6G"]
-    # HALO metadata
+    # Histology metadata
     algorithm_names: list = field(default_factory=list)
     sample_ids: list = field(default_factory=list)
     analysis_regions: list = field(default_factory=list)
@@ -70,7 +76,7 @@ class HaloDataset:
         return list(self.df.columns)
 
 
-# ── Known HALO fluorophore/channel names ─────────────────────────────────────
+# ── Known histology fluorophore/channel names ─────────────────────────────────────
 
 KNOWN_FLUOROPHORES = [
     "DAPI", "Cy5", "5-FAM", "Spectrum Aqua", "Spectrum Orange",
@@ -83,7 +89,7 @@ KNOWN_FLUOROPHORES = [
 
 # ── Column pattern definitions ───────────────────────────────────────────────
 
-# Patterns indicating object-level data (per-object exports from HALO)
+# Patterns indicating object-level data (per-object exports from histology software)
 OBJECT_INDICATOR_PATTERNS = [
     "object id", "cell id",
     "image location",
@@ -99,7 +105,7 @@ OBJECT_INDICATOR_PATTERNS = [
     "classifier label",
 ]
 
-# Patterns indicating summary-level data (HALO analysis output)
+# Patterns indicating summary-level data (histology analysis output)
 SUMMARY_INDICATOR_PATTERNS = [
     "image tag", "job id",
     "total cells", "total objects", "num cells",
@@ -231,7 +237,7 @@ def _get_file_size_mb(filepath: str) -> float:
 
 def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     """Downcast numeric columns to reduce memory usage.
-    Typically saves 40-60% memory on large HALO exports."""
+    Typically saves 40-60% memory on large histology exports."""
     for col in df.select_dtypes(include=["int64"]).columns:
         col_min, col_max = df[col].min(), df[col].max()
         if col_min >= 0 and col_max <= 255:
@@ -258,13 +264,98 @@ def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _read_csv_chunked(
+def _read_csv_dask(
+    filepath_or_buffer,
+    sep: str = ",",
+    max_rows: Optional[int] = None,
+) -> Tuple[pd.DataFrame, int]:
+    """Read a CSV using dask for parallel processing.
+
+    Only works with file paths (strings/Path objects), not file-like objects.
+    Falls back to _read_csv_chunked_pandas for file-like objects.
+
+    Returns (DataFrame, total_row_count).
+    """
+    # Dask cannot read file-like objects; fall back for those
+    if not isinstance(filepath_or_buffer, (str, Path)):
+        return _read_csv_chunked_pandas(filepath_or_buffer, sep=sep, max_rows=max_rows)
+
+    filepath_str = str(filepath_or_buffer)
+    logger.info(f"Reading CSV with dask (parallel): {filepath_str}")
+
+    ddf = dd.read_csv(filepath_str, sep=sep, blocksize="64MB")
+    total_rows = len(ddf)  # triggers a compute for row count
+
+    if max_rows is not None and total_rows > max_rows:
+        # Take the first max_rows rows
+        df = ddf.head(max_rows, npartitions=-1, compute=True)
+    else:
+        df = ddf.compute()
+
+    return df, total_rows
+
+
+def dask_aggregate(
+    filepath: str,
+    sep: str = ",",
+    group_cols: Optional[list] = None,
+    agg_dict: Optional[dict] = None,
+    max_rows: Optional[int] = None,
+) -> pd.DataFrame:
+    """Perform parallel groupby aggregation on a large CSV using dask.
+
+    Reads the file with dask, applies groupby().agg() lazily, then computes
+    the result to a pandas DataFrame. This is useful when you want to aggregate
+    a huge file without loading it all into memory.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the CSV file.
+    sep : str
+        Column separator (default ',').
+    group_cols : list
+        Columns to group by.
+    agg_dict : dict
+        Aggregation specification, e.g. {'Total Cells': 'sum', 'H-Score': 'mean'}.
+    max_rows : int, optional
+        If set, only read up to this many rows before aggregating.
+
+    Returns
+    -------
+    pd.DataFrame
+        Aggregated result as a pandas DataFrame.
+    """
+    if not HAS_DASK:
+        raise RuntimeError(
+            "dask is required for dask_aggregate but is not installed. "
+            "Install it with: pip install 'dask[dataframe]'"
+        )
+    if group_cols is None or agg_dict is None:
+        raise ValueError("group_cols and agg_dict are required for dask_aggregate")
+
+    ddf = dd.read_csv(str(filepath), sep=sep, blocksize="64MB")
+
+    if max_rows is not None:
+        ddf = ddf.head(max_rows, npartitions=-1, compute=False)
+        # head returns a pandas DF when compute=True; wrap back into dask
+        if isinstance(ddf, pd.DataFrame):
+            ddf = dd.from_pandas(ddf, npartitions=1)
+
+    result = ddf.groupby(group_cols).agg(agg_dict)
+    return result.compute().reset_index()
+
+
+def _read_csv_chunked_pandas(
     filepath_or_buffer,
     sep: str = ",",
     max_rows: Optional[int] = None,
     sample_frac: Optional[float] = None,
 ) -> Tuple[pd.DataFrame, int]:
-    """Read a CSV in chunks, optionally sampling or capping rows.
+    """Read a CSV in chunks using pandas, optionally sampling or capping rows.
+
+    This is the pure-pandas fallback used when dask is unavailable or when
+    the input is a file-like object that dask cannot handle.
 
     Returns (DataFrame, total_row_count).
     If file fits in memory, returns all rows.
@@ -298,6 +389,32 @@ def _read_csv_chunked(
     return df, total_rows
 
 
+def _read_csv_chunked(
+    filepath_or_buffer,
+    sep: str = ",",
+    max_rows: Optional[int] = None,
+    sample_frac: Optional[float] = None,
+) -> Tuple[pd.DataFrame, int]:
+    """Read a CSV in chunks, optionally sampling or capping rows.
+
+    When dask is available and the input is a file path (not a file-like object),
+    uses dask for parallel reading. Otherwise falls back to pandas chunked reading.
+
+    Returns (DataFrame, total_row_count).
+    If file fits in memory, returns all rows.
+    """
+    # Use dask for file paths when available and no sampling is requested
+    if HAS_DASK and isinstance(filepath_or_buffer, (str, Path)) and sample_frac is None:
+        try:
+            return _read_csv_dask(filepath_or_buffer, sep=sep, max_rows=max_rows)
+        except Exception as e:
+            logger.warning(f"Dask read failed, falling back to pandas chunked: {e}")
+
+    return _read_csv_chunked_pandas(
+        filepath_or_buffer, sep=sep, max_rows=max_rows, sample_frac=sample_frac,
+    )
+
+
 def load_file(
     filepath: str,
     sheet_name: Optional[str] = None,
@@ -318,8 +435,9 @@ def load_file(
     effective_max = max_rows
     if is_large and effective_max is None:
         effective_max = MAX_INTERACTIVE_ROWS
+        dask_note = " (dask parallel reading enabled)" if HAS_DASK else ""
         logger.info(
-            f"Large file detected ({file_size_mb:.0f} MB). "
+            f"Large file detected ({file_size_mb:.0f} MB){dask_note}. "
             f"Capping at {MAX_INTERACTIVE_ROWS:,} rows for interactive use."
         )
 
@@ -416,7 +534,7 @@ def _match_patterns(column_name: str, patterns: list[str]) -> bool:
 def detect_data_type(df: pd.DataFrame) -> str:
     """Auto-detect whether the data is object-level, summary-level, or cluster-level.
 
-    Uses column name heuristics aligned with real HALO export conventions.
+    Uses column name heuristics aligned with real histology export conventions.
     Object data: Image Location, Object Id, XMin/YMin, per-channel metrics, phenotype combos
     Summary data: Image Tag, Job Id, Total Cells, % columns, H-Score
     """
@@ -593,10 +711,10 @@ def classify_columns(df: pd.DataFrame, data_type: str) -> dict:
     }
 
 
-# ── HALO-specific preprocessing ─────────────────────────────────────────────
+# ── Histology-specific preprocessing ────────────────────────────────────────
 
-def preprocess_halo_summary(df: pd.DataFrame, max_job: bool = False) -> pd.DataFrame:
-    """Preprocess a HALO summary file (same as HaloAnalysis.parse_halo_analysis).
+def preprocess_histology_summary(df: pd.DataFrame, max_job: bool = False) -> pd.DataFrame:
+    """Preprocess a histology summary file (same as HistologyAnalysis.parse_histology_analysis).
 
     - Creates 'Sample ID' from 'Image Tag' (strips .scn)
     - Optionally keeps only the latest Job Id per Sample/Algorithm
@@ -630,7 +748,7 @@ def preprocess_halo_summary(df: pd.DataFrame, max_job: bool = False) -> pd.DataF
 
 def dezero(df: pd.DataFrame, metric: str = "Total Cells") -> pd.DataFrame:
     """Remove rows with zero values in the given metric.
-    Clusters with 0 cells are noise (mirrors HaloMunger.dezero)."""
+    Clusters with 0 cells are noise (mirrors HistologyMunger.dezero)."""
     if metric in df.columns:
         return df[df[metric] > 0].copy()
     return df.copy()
@@ -755,7 +873,7 @@ def get_memory_usage_mb(df: pd.DataFrame) -> float:
     return df.memory_usage(deep=True).sum() / (1024 * 1024)
 
 
-def parse_halo_data(
+def parse_histology_data(
     df: pd.DataFrame,
     filename: str = "unknown",
     force_type: Optional[str] = None,
@@ -763,15 +881,15 @@ def parse_halo_data(
     analysis_area: Optional[str] = None,
     file_size_mb: float = 0.0,
     total_rows: int = 0,
-) -> HaloDataset:
-    """Parse a DataFrame as HALO data, auto-detecting type and classifying columns.
+) -> HistologyDataset:
+    """Parse a DataFrame as histology data, auto-detecting type and classifying columns.
 
-    Handles both real HALO object exports (Image Location, Object Id, per-channel metrics,
+    Handles both real histology object exports (Image Location, Object Id, per-channel metrics,
     phenotype combos like DAPI+ C1+ C2+ C3+ C4+) and summary exports (Image Tag, Job Id,
     Total Cells, % columns, H-Score).
     """
     # Preprocess (derive Sample ID, filter max job)
-    df = preprocess_halo_summary(df, max_job=max_job)
+    df = preprocess_histology_summary(df, max_job=max_job)
 
     # Filter by analysis area if specified
     if analysis_area and "Analysis Region" in df.columns:
@@ -780,14 +898,14 @@ def parse_halo_data(
     data_type = force_type if force_type else detect_data_type(df)
     classified = classify_columns(df, data_type)
 
-    # Extract HALO metadata
+    # Extract histology metadata
     algorithm_names = df["Algorithm Name"].unique().tolist() if "Algorithm Name" in df.columns else []
     sample_ids = df["Sample ID"].unique().tolist() if "Sample ID" in df.columns else []
     analysis_regions = df["Analysis Region"].unique().tolist() if "Analysis Region" in df.columns else []
 
     is_sampled = total_rows > 0 and len(df) < total_rows
 
-    return HaloDataset(
+    return HistologyDataset(
         df=df,
         data_type=data_type,
         filename=filename,
@@ -826,7 +944,7 @@ def parse_halo_data(
 
 # ── Accessor helpers ─────────────────────────────────────────────────────────
 
-def get_filterable_columns(dataset: HaloDataset) -> list[str]:
+def get_filterable_columns(dataset: HistologyDataset) -> list[str]:
     """Return columns suitable for filtering (categorical + annotation)."""
     seen = set()
     result = []
@@ -837,13 +955,13 @@ def get_filterable_columns(dataset: HaloDataset) -> list[str]:
     return result
 
 
-def get_plottable_numeric_columns(dataset: HaloDataset) -> list[str]:
+def get_plottable_numeric_columns(dataset: HistologyDataset) -> list[str]:
     """Return numeric columns suitable for plotting (exclude IDs and phenotype combo binary cols)."""
     exclude = set(dataset.id_columns) | set(dataset.phenotype_combo_columns)
     return [c for c in dataset.numeric_columns if c not in exclude]
 
 
-def get_grouping_columns(dataset: HaloDataset) -> list[str]:
+def get_grouping_columns(dataset: HistologyDataset) -> list[str]:
     """Return columns suitable for grouping/coloring plots."""
     candidates = dataset.categorical_columns + dataset.annotation_columns
     seen = set()
@@ -855,7 +973,7 @@ def get_grouping_columns(dataset: HaloDataset) -> list[str]:
     return result
 
 
-def get_phenotype_columns(dataset: HaloDataset, include_weak_strong: bool = False) -> list[str]:
+def get_phenotype_columns(dataset: HistologyDataset, include_weak_strong: bool = False) -> list[str]:
     """Return phenotype fraction columns, optionally filtering out Weak/Strong/Moderate/Negative.
     Mirrors the broad_describe filtering from anima."""
     cols = dataset.phenotype_fraction_columns
@@ -866,7 +984,7 @@ def get_phenotype_columns(dataset: HaloDataset, include_weak_strong: bool = Fals
     return cols
 
 
-def get_per_channel_columns(dataset: HaloDataset, channel: str) -> dict:
+def get_per_channel_columns(dataset: HistologyDataset, channel: str) -> dict:
     """Get all columns for a specific fluorophore channel.
 
     Returns dict with keys: nucleus_intensity, cell_intensity, classification,

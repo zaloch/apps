@@ -1,6 +1,6 @@
-# Homer - Halo Output Mapper & Explorer for Research (Streamlit Version)
-# A data dashboard for HALO by Indica Labs image analysis data
-# Aligned with anima/HaloAnalysis workflows and column conventions
+# Homer - Histology Output Mapper & Explorer for Research (Streamlit Version)
+# A data dashboard for histology image analysis data
+# Aligned with anima/HistologyAnalysis workflows and column conventions
 __author__ = "Gonzalo Zeballos"
 __license__ = "GNU GPLv3"
 __version__ = "1.0"
@@ -16,10 +16,10 @@ import tempfile
 from io import BytesIO
 
 from homer_core.data_parser import (
-    load_file, parse_halo_data, apply_filters,
+    load_file, parse_histology_data, apply_filters,
     get_filterable_columns, get_plottable_numeric_columns, get_grouping_columns,
     get_phenotype_columns, dezero, remove_outliers, sample_for_plotting,
-    get_memory_usage_mb, HaloDataset, MAX_INTERACTIVE_ROWS,
+    get_memory_usage_mb, HistologyDataset, MAX_INTERACTIVE_ROWS,
 )
 from homer_core.plotting import (
     create_bar_chart, create_stacked_bar_chart, create_scatter_plot,
@@ -42,7 +42,7 @@ from homer_core.metadata import (
 # ── Page Config ──────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="Homer - Halo Data Dashboard",
+    page_title="Homer - Histology Data Dashboard",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -321,7 +321,7 @@ def display_header():
     st.markdown("""
     <div class="homer-header">
         <h1>HOMER</h1>
-        <p>Halo Output Mapper &amp; Explorer for Research</p>
+        <p>Histology Output Mapper &amp; Explorer for Research</p>
         <span class="version-tag">v1.0</span>
     </div>
     """, unsafe_allow_html=True)
@@ -330,7 +330,7 @@ def display_header():
 def display_footer():
     st.markdown("""
     <div class="footer">
-        Homer v1.0 &nbsp;&middot;&nbsp; HALO Data Dashboard &nbsp;&middot;&nbsp; Built with Streamlit
+        Homer v1.0 &nbsp;&middot;&nbsp; Histology Data Dashboard &nbsp;&middot;&nbsp; Built with Streamlit
     </div>
     """, unsafe_allow_html=True)
 
@@ -341,9 +341,9 @@ def render_sidebar():
     st.sidebar.markdown('<div class="sidebar-section-title">Data Upload</div>', unsafe_allow_html=True)
 
     uploaded_file = st.sidebar.file_uploader(
-        "Upload HALO data file",
+        "Upload histology data file",
         type=["csv", "tsv", "txt", "xlsx", "xls"],
-        help="Upload CSV, TSV, or Excel files exported from HALO",
+        help="Upload CSV, TSV, or Excel files exported from histology software",
     )
 
     force_type = st.sidebar.radio(
@@ -352,8 +352,8 @@ def render_sidebar():
         index=0,
     )
 
-    # HALO-specific options
-    with st.sidebar.expander("HALO Options"):
+    # Histology-specific options
+    with st.sidebar.expander("Histology Options"):
         max_job = st.checkbox("Keep only latest Job Id per sample", value=False, key="max_job")
         analysis_area = st.text_input("Filter Analysis Region (blank = all)", value="", key="analysis_area")
 
@@ -372,19 +372,19 @@ def render_sidebar():
 
     if load_demo_object:
         df = generate_object_data(n_cells=demo_n_objects, n_images=demo_n_samples)
-        st.session_state.dataset = parse_halo_data(df, "demo_object_data.csv", force_type="object")
+        st.session_state.dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
         st.session_state.filters = {}
         st.rerun()
 
     if load_demo_summary:
         df = generate_summary_data(n_images=demo_n_samples)
-        st.session_state.dataset = parse_halo_data(df, "demo_summary_data.csv")
+        st.session_state.dataset = parse_histology_data(df, "demo_summary_data.csv")
         st.session_state.filters = {}
         st.rerun()
 
     if load_demo_cluster:
         df = generate_cluster_data(n_clusters=demo_n_objects, n_images=demo_n_samples)
-        st.session_state.dataset = parse_halo_data(df, "demo_cluster_data.csv", force_type="cluster")
+        st.session_state.dataset = parse_histology_data(df, "demo_cluster_data.csv", force_type="cluster")
         st.session_state.filters = {}
         st.rerun()
 
@@ -412,7 +412,7 @@ def render_sidebar():
                 ft = "cluster"
 
             area = analysis_area if analysis_area else None
-            dataset = parse_halo_data(
+            dataset = parse_histology_data(
                 df, uploaded_file.name, force_type=ft,
                 max_job=max_job, analysis_area=area,
                 file_size_mb=file_size_mb, total_rows=total_rows,
@@ -522,7 +522,7 @@ PLOT_TYPES = [
 ]
 
 
-def render_plot_builder(dataset: HaloDataset, filtered_df: pd.DataFrame):
+def render_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFrame):
     st.markdown('<div class="section-header"><span class="icon">📊</span><h3>Plot Builder</h3></div>', unsafe_allow_html=True)
 
     col_config, col_preview = st.columns([1, 2])
@@ -703,10 +703,10 @@ def _render_download_buttons(fig, title, plot_type, x_col, y_col):
 
 # ── Data Processing Tab ─────────────────────────────────────────────────────
 
-def render_data_processing(dataset: HaloDataset, filtered_df: pd.DataFrame):
+def render_data_processing(dataset: HistologyDataset, filtered_df: pd.DataFrame):
     """Render data processing tools (dezero, outlier removal)."""
     st.markdown('<div class="section-header"><span class="icon">🧹</span><h3>Data Processing</h3></div>', unsafe_allow_html=True)
-    st.caption("Tools for cleaning data, mirroring the anima HaloMunger and ClusterCleaner workflows.")
+    st.caption("Tools for cleaning data, mirroring the anima HistologyMunger and ClusterCleaner workflows.")
 
     col1, col2 = st.columns(2)
 
@@ -718,7 +718,7 @@ def render_data_processing(dataset: HaloDataset, filtered_df: pd.DataFrame):
             before_count = len(filtered_df)
             cleaned = dezero(filtered_df, dezero_metric)
             removed = before_count - len(cleaned)
-            st.session_state.dataset = parse_halo_data(cleaned, dataset.filename, force_type=dataset.data_type)
+            st.session_state.dataset = parse_histology_data(cleaned, dataset.filename, force_type=dataset.data_type)
             st.success(f"Removed {removed} zero-valued rows. {len(cleaned)} rows remaining.")
             st.rerun()
 
@@ -764,7 +764,7 @@ def render_data_processing(dataset: HaloDataset, filtered_df: pd.DataFrame):
         st.info(f"Lower bound: {lower:.4f} | Upper bound: {upper:.4f} | Removed: {len(removed)} rows")
 
         if apply_btn:
-            st.session_state.dataset = parse_halo_data(cleaned, dataset.filename, force_type=dataset.data_type)
+            st.session_state.dataset = parse_histology_data(cleaned, dataset.filename, force_type=dataset.data_type)
             st.success(f"Applied {outlier_method} outlier removal. {len(cleaned)} rows remaining.")
             st.rerun()
 
@@ -802,7 +802,7 @@ def render_data_table(filtered_df: pd.DataFrame):
 
 # ── Summary Statistics ───────────────────────────────────────────────────────
 
-def render_summary_stats(dataset: HaloDataset, filtered_df: pd.DataFrame):
+def render_summary_stats(dataset: HistologyDataset, filtered_df: pd.DataFrame):
     st.markdown('<div class="section-header"><span class="icon">📈</span><h3>Summary Statistics</h3></div>', unsafe_allow_html=True)
 
     metric_cols = st.columns(5)
@@ -822,7 +822,7 @@ def render_summary_stats(dataset: HaloDataset, filtered_df: pd.DataFrame):
         mem = get_memory_usage_mb(dataset.df)
         st.metric("Memory", f"{mem:.1f} MB")
 
-    # HALO-specific info
+    # Histology-specific info
     info_cols = st.columns(3)
     with info_cols[0]:
         if dataset.algorithm_names:
@@ -858,7 +858,7 @@ def render_summary_stats(dataset: HaloDataset, filtered_df: pd.DataFrame):
 
 # ── Report Download ──────────────────────────────────────────────────────────
 
-def render_report_section(dataset: HaloDataset, filtered_df: pd.DataFrame):
+def render_report_section(dataset: HistologyDataset, filtered_df: pd.DataFrame):
     st.markdown('<div class="section-header"><span class="icon">📄</span><h3>Report Generation</h3></div>', unsafe_allow_html=True)
 
     n_figs = len(st.session_state.report_figures)
@@ -897,7 +897,7 @@ def render_report_section(dataset: HaloDataset, filtered_df: pd.DataFrame):
 
 # ── Metadata Tab ──────────────────────────────────────────────────────────────
 
-def render_metadata_tab(dataset: HaloDataset, filtered_df: pd.DataFrame):
+def render_metadata_tab(dataset: HistologyDataset, filtered_df: pd.DataFrame):
     """Render metadata management: upload, manual entry, merge, and aggregation."""
     st.markdown('<div class="section-header"><span class="icon">🧬</span><h3>Experimental Metadata</h3></div>', unsafe_allow_html=True)
     st.caption(
@@ -911,7 +911,7 @@ def render_metadata_tab(dataset: HaloDataset, filtered_df: pd.DataFrame):
         st.markdown("#### Upload Metadata CSV")
         st.caption(
             "CSV with one row per sample. Must include a `Sample ID` column "
-            "(matching your HALO data) plus any experimental factors."
+            "(matching your histology data) plus any experimental factors."
         )
         meta_file = st.file_uploader(
             "Upload metadata CSV",
@@ -985,7 +985,7 @@ def render_metadata_tab(dataset: HaloDataset, filtered_df: pd.DataFrame):
                 st.success(f"Applied metadata with factors: {', '.join(meta.factor_columns)}")
                 st.rerun()
         else:
-            st.info("Load HALO data first to see sample IDs for metadata entry.")
+            st.info("Load histology data first to see sample IDs for metadata entry.")
 
     # ── Show current metadata status and merge ──
     st.markdown("---")
@@ -1010,12 +1010,12 @@ def render_metadata_tab(dataset: HaloDataset, filtered_df: pd.DataFrame):
 
         st.markdown("#### Merge & Aggregate")
 
-        # Merge metadata into HALO data
-        if st.button("Merge Metadata into HALO Data", type="primary", key="merge_meta"):
+        # Merge metadata into histology data
+        if st.button("Merge Metadata into Histology Data", type="primary", key="merge_meta"):
             try:
                 merged_df = merge_metadata(filtered_df, meta)
                 # Re-parse with merged data
-                new_dataset = parse_halo_data(
+                new_dataset = parse_histology_data(
                     merged_df, dataset.filename,
                     force_type=dataset.data_type,
                     file_size_mb=dataset.file_size_mb,
@@ -1070,7 +1070,7 @@ def render_metadata_tab(dataset: HaloDataset, filtered_df: pd.DataFrame):
                     st.session_state.aggregated_df = agg_df
 
                     # Also parse as a new dataset for plotting
-                    agg_dataset = parse_halo_data(
+                    agg_dataset = parse_histology_data(
                         agg_df, f"{dataset.filename}_aggregated",
                         force_type="summary",
                         file_size_mb=0,
@@ -1095,7 +1095,7 @@ def render_metadata_tab(dataset: HaloDataset, filtered_df: pd.DataFrame):
                 st.dataframe(agg_df[display_cols], use_container_width=True, height=300)
 
                 if st.button("Use Aggregated Data for Plotting", key="use_agg"):
-                    st.session_state.dataset = parse_halo_data(
+                    st.session_state.dataset = parse_histology_data(
                         agg_df, f"{dataset.filename}_aggregated",
                         force_type="summary",
                     )
@@ -1137,8 +1137,8 @@ def main():
         <div class="getting-started-grid">
             <div class="gs-card">
                 <div class="gs-icon">📂</div>
-                <h4>Upload HALO Data</h4>
-                <p>Import CSV, TSV, or Excel files exported from HALO. Auto-detects object, summary, or cluster data types.</p>
+                <h4>Upload Histology Data</h4>
+                <p>Import CSV, TSV, or Excel files exported from histology software. Auto-detects object, summary, or cluster data types.</p>
             </div>
             <div class="gs-card">
                 <div class="gs-icon">🧪</div>

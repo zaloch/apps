@@ -1,6 +1,6 @@
 # Homer - Plotting module using Plotly for interactive charts
 # and Matplotlib/Seaborn for static/PDF-ready figures
-# Includes anima-style HALO analysis plots (stripplot, pairplot, before/after)
+# Includes anima-style histology analysis plots (stripplot, pairplot, before/after)
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -19,13 +19,30 @@ from typing import Optional
 # ── Color palette ────────────────────────────────────────────────────────────
 
 HOMER_COLORS = [
-    "#2E86AB", "#A23B72", "#F18F01", "#C73E1D", "#3B1F2B",
-    "#44BBA4", "#E94F37", "#393E41", "#D4A373", "#6B4226",
-    "#1B998B", "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
-    "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F", "#BB8FCE",
+    "#4FC3F7", "#FF6B9D", "#FFB74D", "#81C784", "#BA68C8",
+    "#4DD0E1", "#FF8A65", "#AED581", "#F06292", "#FFD54F",
+    "#7986CB", "#E57373", "#4DB6AC", "#DCE775", "#90A4AE",
+    "#CE93D8", "#80DEEA", "#FFAB91", "#C5E1A5", "#EF9A9A",
 ]
 
-HOMER_TEMPLATE = "plotly_white"
+HOMER_TEMPLATE = "plotly_dark"
+
+DARK_LAYOUT = dict(
+    paper_bgcolor="#0E1117",
+    plot_bgcolor="#1B2028",
+    font=dict(family="Inter, Arial, sans-serif", size=12, color="#E0E0E0"),
+    title_font_color="#FFFFFF",
+    legend_font_color="#E0E0E0",
+    xaxis=dict(gridcolor="#2A2F3A", zerolinecolor="#2A2F3A"),
+    yaxis=dict(gridcolor="#2A2F3A", zerolinecolor="#2A2F3A"),
+    margin=dict(t=50, b=50, l=50, r=50),
+)
+
+
+def apply_dark_theme(fig):
+    """Apply the dark theme layout to any Plotly figure and return it."""
+    fig.update_layout(**DARK_LAYOUT)
+    return fig
 
 
 # ── Plotly interactive figures ───────────────────────────────────────────────
@@ -64,6 +81,7 @@ def create_bar_chart(
         font=dict(family="Arial, sans-serif", size=12),
         margin=dict(t=50, b=50, l=50, r=50),
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -102,6 +120,7 @@ def create_stacked_bar_chart(
         legend_title_text=color,
         font=dict(family="Arial, sans-serif", size=12),
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -129,6 +148,7 @@ def create_scatter_plot(
         legend_title_text=color or "",
         font=dict(family="Arial, sans-serif", size=12),
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -155,6 +175,7 @@ def create_box_plot(
         legend_title_text=color or "",
         font=dict(family="Arial, sans-serif", size=12),
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -179,6 +200,7 @@ def create_violin_plot(
         yaxis_title=y_label or y,
         font=dict(family="Arial, sans-serif", size=12),
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -203,6 +225,7 @@ def create_histogram(
         yaxis_title=y_label,
         font=dict(family="Arial, sans-serif", size=12),
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -229,6 +252,7 @@ def create_heatmap(
         template=HOMER_TEMPLATE,
         font=dict(family="Arial, sans-serif", size=12),
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -254,6 +278,7 @@ def create_xy_line_plot(
         yaxis_title=y_label or y,
         font=dict(family="Arial, sans-serif", size=12),
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -280,16 +305,22 @@ def _apply_homer_style():
     """Apply Homer styling to matplotlib plots."""
     plt.rcParams.update({
         "font.family": "sans-serif",
-        "font.sans-serif": ["Arial", "DejaVu Sans"],
+        "font.sans-serif": ["Inter", "Arial", "DejaVu Sans"],
         "font.size": 10,
         "axes.titlesize": 12,
         "axes.labelsize": 11,
-        "figure.facecolor": "white",
-        "axes.facecolor": "white",
+        "figure.facecolor": "#0E1117",
+        "axes.facecolor": "#1B2028",
+        "text.color": "#E0E0E0",
+        "axes.labelcolor": "#E0E0E0",
+        "xtick.color": "#E0E0E0",
+        "ytick.color": "#E0E0E0",
         "axes.grid": True,
-        "grid.alpha": 0.3,
+        "grid.color": "#2A2F3A",
+        "grid.alpha": 0.5,
         "axes.spines.top": False,
         "axes.spines.right": False,
+        "axes.edgecolor": "#2A2F3A",
     })
 
 
@@ -421,6 +452,7 @@ def create_strip_plot(
     elif "%" in y:
         fig.update_yaxes(range=[0, 100])
 
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -443,6 +475,7 @@ def create_swarm_plot(
         font=dict(family="Arial, sans-serif", size=12),
         xaxis_tickangle=-45,
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -502,6 +535,7 @@ def create_outlier_comparison(
     fig.update_xaxes(title_text=metric, row=1, col=2)
     fig.update_yaxes(title_text="Count", row=1, col=1)
 
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -516,7 +550,7 @@ def create_pairplot_matrix(
 ) -> go.Figure:
     """Create a Plotly scatter matrix (pairplot).
 
-    Mirrors HaloIngest.broad_describe pairplot from anima.
+    Mirrors HistologyIngest.broad_describe pairplot from anima.
     """
     cols = columns[:max_cols]
     fig = px.scatter_matrix(
@@ -531,6 +565,7 @@ def create_pairplot_matrix(
         height=150 * len(cols) + 100,
         width=150 * len(cols) + 100,
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -581,6 +616,7 @@ def create_sample_overview_strip(
         height=500,
         boxmode="group",
     )
+    fig.update_layout(**DARK_LAYOUT)
     return fig
 
 
@@ -594,7 +630,7 @@ def mpl_pairplot(
 ) -> plt.Figure:
     """Create a seaborn pairplot for PDF reports.
 
-    Mirrors HaloIngest.broad_describe from anima.
+    Mirrors HistologyIngest.broad_describe from anima.
     """
     _apply_homer_style()
     cols = columns[:max_cols]

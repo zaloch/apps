@@ -1,6 +1,6 @@
 # Homer - Plotting module using Plotly for interactive charts
 # and Matplotlib/Seaborn for static/PDF-ready figures
-# Includes anima-style HALO analysis plots (stripplot, pairplot, before/after)
+# Includes anima-style histology analysis plots (stripplot, pairplot, before/after)
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -550,7 +550,7 @@ def create_pairplot_matrix(
 ) -> go.Figure:
     """Create a Plotly scatter matrix (pairplot).
 
-    Mirrors HaloIngest.broad_describe pairplot from anima.
+    Mirrors HistologyIngest.broad_describe pairplot from anima.
     """
     cols = columns[:max_cols]
     fig = px.scatter_matrix(
@@ -630,7 +630,7 @@ def mpl_pairplot(
 ) -> plt.Figure:
     """Create a seaborn pairplot for PDF reports.
 
-    Mirrors HaloIngest.broad_describe from anima.
+    Mirrors HistologyIngest.broad_describe from anima.
     """
     _apply_homer_style()
     cols = columns[:max_cols]

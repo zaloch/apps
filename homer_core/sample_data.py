@@ -1,6 +1,6 @@
 # Homer - Sample Data Generator
-# Creates realistic HALO-like data for testing and demonstration
-# Aligned with real HALO object export format (802_NeuN_SOX9_GFP_CD31_objectdata style)
+# Creates realistic histology-like data for testing and demonstration
+# Aligned with real histology object export format (802_NeuN_SOX9_GFP_CD31_objectdata style)
 
 import pandas as pd
 import numpy as np
@@ -10,7 +10,7 @@ from itertools import product
 def _generate_phenotype_combos(n_channels: int = 4) -> list[str]:
     """Generate all phenotype combination column names.
 
-    Matches real HALO format: DAPI+ C1+ C2+ C3+ C4+, DAPI+ C1+ C2+ C3+ C4-, etc.
+    Matches real histology format: DAPI+ C1+ C2+ C3+ C4+, DAPI+ C1+ C2+ C3+ C4-, etc.
     Plus DAPI+ and DAPI- columns.
     """
     combos = []
@@ -28,7 +28,7 @@ def _generate_phenotype_combos(n_channels: int = 4) -> list[str]:
 
 
 def _per_channel_columns(channel: str) -> list[str]:
-    """Generate per-channel column names matching real HALO format."""
+    """Generate per-channel column names matching real histology format."""
     return [
         f"{channel} Positive Classification",
         f"{channel} Positive Nucleus Classification",
@@ -69,7 +69,7 @@ def _build_image_meta(n_images: int, rng) -> list[dict]:
 
 
 def generate_object_data(n_cells: int = 5000, n_images: int = 4) -> pd.DataFrame:
-    """Generate realistic HALO object-level data matching the real export format.
+    """Generate realistic histology object-level data matching the real export format.
 
     Every row is fully populated — no empty fields. Includes experimental
     metadata columns: Treatment Group, Genotype, Subject ID, Timepoint,
@@ -173,7 +173,7 @@ def generate_object_data(n_cells: int = 5000, n_images: int = 4) -> pd.DataFrame
 
 
 def generate_summary_data(n_images: int = 12) -> pd.DataFrame:
-    """Generate realistic HALO summary-level data.
+    """Generate realistic histology summary-level data.
 
     Every row is fully populated — no empty fields. Includes experimental
     metadata columns: Treatment Group, Genotype, Subject ID, Timepoint,
@@ -275,7 +275,7 @@ def generate_summary_data(n_images: int = 12) -> pd.DataFrame:
 
 
 def generate_cluster_data(n_clusters: int = 200, n_images: int = 4) -> pd.DataFrame:
-    """Generate realistic HALO cluster/aggregated object data.
+    """Generate realistic histology cluster/aggregated object data.
 
     Every row is fully populated — no empty fields. Includes experimental
     metadata columns: Treatment Group, Genotype, Subject ID, Timepoint,
