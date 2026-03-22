@@ -89,7 +89,7 @@ def generate_object_data(n_cells: int = 5000, n_images: int = 3) -> pd.DataFrame
 
     image_locs = [m["image_loc"] for m in image_meta]
     regions = ["Whole Brain", "Cortex", "Hippocampus", "Cerebellum"]
-    algorithms = ["RGM_R802_GFP NeuN"]
+    algorithms = ["Multiplex FL v4.2.3"]
 
     # Phenotype combo columns
     phenotype_combos = _generate_phenotype_combos(4)
