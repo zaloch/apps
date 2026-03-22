@@ -56,38 +56,45 @@ html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
 }
 
-/* ── Header (compact) ──────────────────────────────────────────────────── */
+/* ── Kill Streamlit top padding ──────────────────────────────────────── */
+.stApp > header { display: none; }
+section.main > div.block-container {
+    padding-top: 0.5rem !important;
+    max-width: 100% !important;
+}
+
+/* ── Header (minimal bar) ────────────────────────────────────────────── */
 .homer-header {
     display: flex;
-    align-items: baseline;
-    gap: 0.8rem;
-    padding: 0.5rem 0;
-    margin-bottom: 0.5rem;
-    border-bottom: 1px solid rgba(99, 179, 237, 0.1);
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.2rem 0;
+    margin-bottom: 0.3rem;
+    border-bottom: 1px solid rgba(99, 179, 237, 0.08);
 }
 .homer-header h1 {
     margin: 0;
-    font-size: 1.3rem;
+    font-size: 0.9rem;
     font-weight: 800;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
     background: linear-gradient(135deg, #4FC3F7, #81D4FA);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 .homer-header p {
     margin: 0;
-    font-size: 0.75rem;
+    font-size: 0.6rem;
     color: #64748b;
     font-weight: 400;
 }
 .homer-header .version-tag {
-    background: rgba(99, 179, 237, 0.1);
+    background: rgba(99, 179, 237, 0.08);
     color: #4FC3F7;
-    padding: 0.1rem 0.5rem;
-    border-radius: 10px;
-    font-size: 0.6rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 6px;
+    font-size: 0.5rem;
     font-weight: 600;
-    border: 1px solid rgba(99, 179, 237, 0.15);
+    border: 1px solid rgba(99, 179, 237, 0.1);
     margin-left: auto;
 }
 
@@ -539,54 +546,65 @@ PLOT_TYPES = [
 
 
 def render_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFrame):
-    st.markdown('<div class="section-header"><span class="icon">📊</span><h3>Plot Builder</h3></div>', unsafe_allow_html=True)
+    # ── Plot display area (full width, top) ──
+    plot_container = st.container()
 
-    col_config, col_preview = st.columns([1, 2])
-
-    with col_config:
-        plot_type = st.selectbox("Plot Type", PLOT_TYPES)
-
+    # ── Collapsible config panel below ──
+    with st.expander("Plot Configuration", expanded=True):
         numeric_cols = get_plottable_numeric_columns(dataset)
         grouping_cols = get_grouping_columns(dataset)
         phenotype_cols = get_phenotype_columns(dataset)
 
-        # Axis selection based on plot type
-        x_col = y_col = None
+        # Row 1: type + axes (compact horizontal layout)
+        c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
 
-        if plot_type == "Histogram":
-            x_col = st.selectbox("Variable", numeric_cols, key="x_col")
-        elif plot_type in ("Box Plot", "Violin Plot", "Strip Plot", "Swarm Plot"):
-            x_col = st.selectbox("Grouping (X)", ["(None)"] + grouping_cols, key="x_col")
-            if x_col == "(None)":
-                x_col = None
-            y_col = st.selectbox("Value (Y)", numeric_cols, key="y_col")
-        elif plot_type == "Pairplot Matrix":
-            default_cols = phenotype_cols[:5] if phenotype_cols else numeric_cols[:5]
-            pair_cols = st.multiselect("Columns for pairplot", numeric_cols, default=default_cols, key="pair_cols")
-        elif plot_type == "Sample Overview":
-            sample_col = st.selectbox("Sample Column", grouping_cols,
-                                       index=grouping_cols.index("Sample ID") if "Sample ID" in grouping_cols else 0,
-                                       key="sample_col")
-            overview_metrics = st.multiselect("Metrics", numeric_cols,
-                                              default=phenotype_cols[:4] if phenotype_cols else numeric_cols[:4],
-                                              key="overview_metrics")
-        else:
-            if plot_type in ("Bar Chart", "Stacked Bar Chart"):
+        with c1:
+            plot_type = st.selectbox("Plot Type", PLOT_TYPES)
+
+        x_col = y_col = None
+        pair_cols = None
+        sample_col = None
+        overview_metrics = None
+
+        with c2:
+            if plot_type == "Histogram":
+                x_col = st.selectbox("Variable", numeric_cols, key="x_col")
+            elif plot_type in ("Box Plot", "Violin Plot", "Strip Plot", "Swarm Plot"):
+                x_col = st.selectbox("Grouping (X)", ["(None)"] + grouping_cols, key="x_col")
+                if x_col == "(None)":
+                    x_col = None
+            elif plot_type == "Pairplot Matrix":
+                default_cols = phenotype_cols[:5] if phenotype_cols else numeric_cols[:5]
+                pair_cols = st.multiselect("Columns", numeric_cols, default=default_cols, key="pair_cols")
+            elif plot_type == "Sample Overview":
+                sample_col = st.selectbox("Sample Column", grouping_cols,
+                                           index=grouping_cols.index("Sample ID") if "Sample ID" in grouping_cols else 0,
+                                           key="sample_col")
+            elif plot_type in ("Bar Chart", "Stacked Bar Chart"):
                 x_col = st.selectbox("X Axis", grouping_cols + numeric_cols, key="x_col")
             else:
                 x_col = st.selectbox("X Axis", numeric_cols + grouping_cols, key="x_col")
-            y_col = st.selectbox("Y Axis", numeric_cols, key="y_col")
 
-        # Color/group
-        color_col = None
-        if plot_type not in ("Pairplot Matrix", "Sample Overview"):
-            color_col = st.selectbox("Color / Group By", ["(None)"] + grouping_cols, key="color_col")
-            if color_col == "(None)":
-                color_col = None
+        with c3:
+            if plot_type in ("Box Plot", "Violin Plot", "Strip Plot", "Swarm Plot"):
+                y_col = st.selectbox("Value (Y)", numeric_cols, key="y_col")
+            elif plot_type == "Sample Overview":
+                overview_metrics = st.multiselect("Metrics", numeric_cols,
+                                                  default=phenotype_cols[:4] if phenotype_cols else numeric_cols[:4],
+                                                  key="overview_metrics")
+            elif plot_type not in ("Histogram", "Pairplot Matrix"):
+                y_col = st.selectbox("Y Axis", numeric_cols, key="y_col")
 
-        title = st.text_input("Chart Title", value="", key="chart_title")
+        with c4:
+            color_col = None
+            if plot_type not in ("Pairplot Matrix", "Sample Overview"):
+                color_col = st.selectbox("Color / Group", ["(None)"] + grouping_cols, key="color_col")
+                if color_col == "(None)":
+                    color_col = None
 
-        # Plot-specific options
+        # Row 2: title + options + generate
+        o1, o2, o3 = st.columns([2, 2, 1])
+
         orientation = "v"
         barmode = "group"
         normalize = False
@@ -594,97 +612,56 @@ def render_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFrame):
         points = "outliers"
         nbins = 50
         agg_func = "mean"
+        title = ""
 
-        if plot_type == "Bar Chart":
-            orientation = "v" if st.radio("Orientation", ["Vertical", "Horizontal"], key="orient") == "Vertical" else "h"
-            barmode = st.radio("Bar Mode", ["group", "overlay"], key="barmode")
-            agg_func = st.selectbox("Aggregation", ["mean", "median", "sum", "count"], key="agg_func")
+        with o1:
+            title = st.text_input("Chart Title", value="", key="chart_title")
 
-        elif plot_type == "Stacked Bar Chart":
-            orientation = "v" if st.radio("Orientation", ["Vertical", "Horizontal"], key="orient") == "Vertical" else "h"
-            normalize = st.checkbox("Normalize to 100%", key="normalize")
-            agg_func = st.selectbox("Aggregation", ["mean", "median", "sum", "count"], key="agg_func")
+        with o2:
+            if plot_type == "Bar Chart":
+                oo1, oo2, oo3 = st.columns(3)
+                with oo1:
+                    orientation = "v" if st.radio("Orient", ["V", "H"], key="orient", horizontal=True) == "V" else "h"
+                with oo2:
+                    barmode = st.radio("Mode", ["group", "overlay"], key="barmode", horizontal=True)
+                with oo3:
+                    agg_func = st.selectbox("Agg", ["mean", "median", "sum", "count"], key="agg_func")
+            elif plot_type == "Stacked Bar Chart":
+                oo1, oo2, oo3 = st.columns(3)
+                with oo1:
+                    orientation = "v" if st.radio("Orient", ["V", "H"], key="orient", horizontal=True) == "V" else "h"
+                with oo2:
+                    normalize = st.checkbox("Normalize %", key="normalize")
+                with oo3:
+                    agg_func = st.selectbox("Agg", ["mean", "median", "sum", "count"], key="agg_func")
+            elif plot_type == "Scatter Plot":
+                trend = st.selectbox("Trendline", ["None", "OLS", "LOWESS"], key="trend")
+                trendline = None if trend == "None" else trend.lower()
+            elif plot_type in ("Box Plot", "Violin Plot"):
+                points = st.selectbox("Points", ["outliers", "all", "suspectedoutliers", False], key="points")
+            elif plot_type == "Histogram":
+                nbins = st.slider("Bins", 10, 200, 50, key="nbins")
 
-        elif plot_type == "Scatter Plot":
-            trend = st.selectbox("Trendline", ["None", "OLS", "LOWESS"], key="trend")
-            trendline = None if trend == "None" else trend.lower()
+        with o3:
+            st.write("")  # vertical align
+            generate_btn = st.button("Generate Plot", type="primary", use_container_width=True)
 
-        elif plot_type in ("Box Plot", "Violin Plot"):
-            points = st.selectbox("Show Points", ["outliers", "all", "suspectedoutliers", False], key="points")
-
-        elif plot_type == "Histogram":
-            nbins = st.slider("Number of Bins", 10, 200, 50, key="nbins")
-
-        generate_btn = st.button("Generate Plot", type="primary", use_container_width=True)
-
-    with col_preview:
+    # ── Render plot in full-width container ──
+    with plot_container:
         if generate_btn:
             st.session_state.plot_counter += 1
-
             try:
-                plot_df = filtered_df.copy()
-
-                # Downsample for plotting if dataset is large
-                if len(plot_df) > 50_000 and plot_type in (
-                    "Scatter Plot", "Strip Plot", "Swarm Plot", "Pairplot Matrix",
-                ):
-                    plot_df = sample_for_plotting(plot_df, max_points=50_000,
-                                                   stratify_col=color_col)
-                    st.caption(f"Showing {len(plot_df):,} sampled points for performance.")
-                fig = None
-
-                # Aggregate for bar charts
-                if plot_type in ("Bar Chart", "Stacked Bar Chart") and y_col and x_col:
-                    group_cols = [x_col]
-                    if color_col:
-                        group_cols.append(color_col)
-                    plot_df = plot_df.groupby(group_cols, as_index=False)[y_col].agg(agg_func)
-
-                if plot_type == "Bar Chart":
-                    fig = create_bar_chart(plot_df, x_col, y_col, color=color_col,
-                                           orientation=orientation, barmode=barmode, title=title)
-                elif plot_type == "Stacked Bar Chart":
-                    if not color_col:
-                        st.warning("Stacked bar charts require a Color/Group By column.")
-                    else:
-                        fig = create_stacked_bar_chart(plot_df, x_col, y_col, color=color_col,
-                                                       orientation=orientation, title=title, normalize=normalize)
-                elif plot_type == "Scatter Plot":
-                    fig = create_scatter_plot(plot_df, x_col, y_col, color=color_col,
-                                              title=title, trendline=trendline)
-                elif plot_type == "Box Plot":
-                    fig = create_box_plot(plot_df, x_col, y_col, color=color_col,
-                                          title=title, points=points)
-                elif plot_type == "Violin Plot":
-                    fig = create_violin_plot(plot_df, x_col, y_col, color=color_col, title=title)
-                elif plot_type == "Strip Plot":
-                    fig = create_strip_plot(plot_df, x_col or "index", y_col, color=color_col, title=title)
-                elif plot_type == "Swarm Plot":
-                    fig = create_swarm_plot(plot_df, x_col or "index", y_col, color=color_col, title=title)
-                elif plot_type == "Histogram":
-                    fig = create_histogram(plot_df, x_col, color=color_col, nbins=nbins, title=title)
-                elif plot_type == "XY Line Plot":
-                    fig = create_xy_line_plot(plot_df, x_col, y_col, color=color_col, title=title)
-                elif plot_type == "Heatmap":
-                    z_col = st.selectbox("Value (Z/Color)", numeric_cols, key="z_col")
-                    if y_col:
-                        fig = create_heatmap(plot_df, x_col, y_col, z_col, title=title)
-                elif plot_type == "Pairplot Matrix":
-                    if pair_cols and len(pair_cols) >= 2:
-                        fig = create_pairplot_matrix(plot_df, pair_cols, color=color_col, title=title)
-                    else:
-                        st.warning("Select at least 2 columns for pairplot.")
-                elif plot_type == "Sample Overview":
-                    if overview_metrics:
-                        fig = create_sample_overview_strip(plot_df, overview_metrics,
-                                                           sample_col=sample_col, title=title)
-                    else:
-                        st.warning("Select at least 1 metric.")
-
+                fig = _build_single_plot(
+                    dataset, filtered_df, plot_type,
+                    x_col=x_col, y_col=y_col, color_col=color_col,
+                    title=title, agg_func=agg_func, orientation=orientation,
+                    barmode=barmode, normalize=normalize, trendline=trendline,
+                    points=points, nbins=nbins, pair_cols=pair_cols,
+                    sample_col=sample_col, overview_metrics=overview_metrics,
+                )
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
                     _render_download_buttons(fig, title, plot_type, x_col, y_col)
-
             except Exception as e:
                 st.error(f"Error generating plot: {e}")
 
