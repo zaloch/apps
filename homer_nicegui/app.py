@@ -1,6 +1,6 @@
-# Homer - Halo Output Mapper & Explorer for Research (NiceGUI Version)
-# A data dashboard for HALO by Indica Labs image analysis data
-# Aligned with anima/HaloAnalysis workflows and column conventions
+# Homer - Histology Output Mapper & Explorer for Research (NiceGUI Version)
+# A data dashboard for histology image analysis data
+# Aligned with anima/HistologyAnalysis workflows and column conventions
 __author__ = "Gonzalo Zeballos"
 __license__ = "GNU GPLv3"
 __version__ = "1.0"
@@ -18,10 +18,10 @@ import base64
 import tempfile
 
 from homer_core.data_parser import (
-    load_uploaded_file, load_file, parse_halo_data, apply_filters,
+    load_uploaded_file, load_file, parse_histology_data, apply_filters,
     get_filterable_columns, get_plottable_numeric_columns, get_grouping_columns,
     get_phenotype_columns, dezero, remove_outliers, sample_for_plotting,
-    get_memory_usage_mb, HaloDataset, MAX_INTERACTIVE_ROWS,
+    get_memory_usage_mb, HistologyDataset, MAX_INTERACTIVE_ROWS,
 )
 from homer_core.plotting import (
     create_bar_chart, create_stacked_bar_chart, create_scatter_plot,
@@ -45,7 +45,7 @@ from homer_core.metadata import (
 
 class AppState:
     def __init__(self):
-        self.dataset: HaloDataset | None = None
+        self.dataset: HistologyDataset | None = None
         self.filters: dict = {}
         self.report_figures: list[dict] = []
         self.plot_counter: int = 0
@@ -60,36 +60,182 @@ state = AppState()
 
 HOMER_CSS = """
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+body, .q-page, .nicegui-content {
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
 .homer-header {
-    background: linear-gradient(135deg, #2E86AB 0%, #1a5276 100%);
-    padding: 1.2rem 2rem;
-    border-radius: 10px;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    padding: 1.5rem 2.5rem;
+    border-radius: 14px;
     color: white;
     margin-bottom: 1rem;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(99, 179, 237, 0.12);
 }
-.homer-header h1 { margin: 0; font-size: 2rem; font-weight: 700; }
-.homer-header p { margin: 0.2rem 0 0 0; font-size: 0.95rem; opacity: 0.85; }
+.homer-header::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #4FC3F7, #7C4DFF, #4FC3F7);
+    border-radius: 14px 14px 0 0;
+}
+.homer-header h1 {
+    margin: 0;
+    font-size: 1.8rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, #4FC3F7, #81D4FA);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.homer-header p {
+    margin: 0.2rem 0 0 0;
+    font-size: 0.85rem;
+    color: #94a3b8;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+}
+.homer-header .version-tag {
+    position: absolute;
+    top: 1rem;
+    right: 1.8rem;
+    background: rgba(99, 179, 237, 0.1);
+    color: #4FC3F7;
+    padding: 0.15rem 0.6rem;
+    border-radius: 20px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    border: 1px solid rgba(99, 179, 237, 0.2);
+}
 
+/* ── Data Badges ────────────────────────────────────────────────────────── */
 .data-badge {
     display: inline-block;
-    padding: 0.2rem 0.6rem;
-    border-radius: 15px;
-    font-size: 0.75rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.7rem;
     font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
-.badge-object { background: #d4edda; color: #155724; }
-.badge-summary { background: #cce5ff; color: #004085; }
-.badge-cluster { background: #fff3cd; color: #856404; }
+.badge-object { background: rgba(129, 199, 132, 0.12); color: #66BB6A; border: 1px solid rgba(129, 199, 132, 0.25); }
+.badge-summary { background: rgba(79, 195, 247, 0.12); color: #4FC3F7; border: 1px solid rgba(79, 195, 247, 0.25); }
+.badge-cluster { background: rgba(255, 183, 77, 0.12); color: #FFB74D; border: 1px solid rgba(255, 183, 77, 0.25); }
 
+/* ── Metric Cards ───────────────────────────────────────────────────────── */
 .metric-card {
-    background: #f8f9fa;
-    padding: 0.8rem;
-    border-radius: 8px;
-    border-left: 4px solid #2E86AB;
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    padding: 1.1rem 1.3rem;
+    border-radius: 12px;
+    border: 1px solid rgba(99, 179, 237, 0.1);
     text-align: center;
+    transition: transform 0.2s ease, border-color 0.2s ease;
 }
-.metric-card .value { font-size: 1.5rem; font-weight: 700; color: #2E86AB; }
-.metric-card .label { font-size: 0.8rem; color: #666; }
+.metric-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(99, 179, 237, 0.3);
+}
+.metric-card .value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #4FC3F7;
+    line-height: 1.2;
+}
+.metric-card .label {
+    font-size: 0.7rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 0.25rem;
+}
+
+/* ── Getting Started Cards ──────────────────────────────────────────────── */
+.getting-started-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+.gs-card {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border: 1px solid rgba(99, 179, 237, 0.1);
+    border-radius: 12px;
+    padding: 1.3rem;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.gs-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(99, 179, 237, 0.25);
+}
+.gs-card .gs-icon { font-size: 1.6rem; margin-bottom: 0.5rem; }
+.gs-card h4 { margin: 0 0 0.3rem 0; font-size: 0.95rem; font-weight: 600; color: #e2e8f0; }
+.gs-card p { margin: 0; font-size: 0.8rem; color: #94a3b8; line-height: 1.5; }
+
+/* ── Workflow Steps ──────────────────────────────────────────────────────── */
+.workflow-steps {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 1rem 0;
+}
+.workflow-step {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(30, 41, 59, 0.8);
+    padding: 0.4rem 0.8rem;
+    border-radius: 20px;
+    border: 1px solid rgba(99, 179, 237, 0.08);
+    font-size: 0.75rem;
+    color: #cbd5e1;
+}
+.workflow-step .step-num {
+    background: rgba(79, 195, 247, 0.15);
+    color: #4FC3F7;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+/* ── Plot Chips ──────────────────────────────────────────────────────────── */
+.plot-types-row { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.6rem; }
+.plot-chip {
+    background: rgba(30, 41, 59, 0.9);
+    border: 1px solid rgba(99, 179, 237, 0.1);
+    padding: 0.25rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    color: #94a3b8;
+    font-weight: 500;
+}
+
+/* ── Section Title ──────────────────────────────────────────────────────── */
+.sidebar-section-title {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    margin-top: 0.8rem;
+    margin-bottom: 0.3rem;
+}
+
+/* ── Sidebar Tweaks ─────────────────────────────────────────────────────── */
+.q-drawer { border-right: 1px solid rgba(99, 179, 237, 0.08) !important; }
+
+/* ── Tab Tweaks ──────────────────────────────────────────────────────────── */
+.q-tabs--dense .q-tab { min-height: 40px; }
 </style>
 """
 
@@ -129,7 +275,7 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
         elif "Cluster" in force_val:
             ft = "cluster"
 
-        state.dataset = parse_halo_data(
+        state.dataset = parse_histology_data(
             df, filename, force_type=ft, max_job=max_job_cb.value,
             file_size_mb=actual_file_size_mb, total_rows=total_rows,
         )
@@ -145,18 +291,18 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
         ui.notify(f"Error loading file: {ex}", type="negative")
 
 
-def load_demo(demo_type: str):
+def load_demo(demo_type: str, n_samples: int = 8, n_objects: int = 5000):
     if demo_type == "object":
-        df = generate_object_data(n_cells=5000, n_images=3)
-        state.dataset = parse_halo_data(df, "demo_object_data.csv", force_type="object")
+        df = generate_object_data(n_cells=n_objects, n_images=n_samples)
+        state.dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
     elif demo_type == "summary":
-        df = generate_summary_data(n_images=12)
-        state.dataset = parse_halo_data(df, "demo_summary_data.csv")
+        df = generate_summary_data(n_images=n_samples)
+        state.dataset = parse_histology_data(df, "demo_summary_data.csv")
     elif demo_type == "cluster":
-        df = generate_cluster_data(n_clusters=200, n_images=4)
-        state.dataset = parse_halo_data(df, "demo_cluster_data.csv", force_type="cluster")
+        df = generate_cluster_data(n_clusters=n_objects, n_images=n_samples)
+        state.dataset = parse_histology_data(df, "demo_cluster_data.csv", force_type="cluster")
     state.filters = {}
-    ui.notify(f"Loaded {demo_type} demo data", type="positive")
+    ui.notify(f"Loaded {demo_type} demo data ({n_samples} samples)", type="positive")
     main_content.refresh()
     sidebar_info.refresh()
 
@@ -382,28 +528,75 @@ def sidebar_info():
 @ui.refreshable
 def main_content():
     if state.dataset is None:
-        with ui.card().classes("w-full max-w-3xl mx-auto mt-8 p-8"):
-            ui.markdown("""
-### Getting Started
+        with ui.column().classes("w-full max-w-5xl mx-auto mt-6 px-4"):
+            ui.html("""
+            <div class="workflow-steps">
+                <div class="workflow-step"><span class="step-num">1</span> Upload data</div>
+                <div class="workflow-step"><span class="step-num">2</span> Add metadata</div>
+                <div class="workflow-step"><span class="step-num">3</span> Merge &amp; aggregate</div>
+                <div class="workflow-step"><span class="step-num">4</span> Plot &amp; explore</div>
+                <div class="workflow-step"><span class="step-num">5</span> Export report</div>
+            </div>
 
-1. **Upload** a HALO data file (CSV, TSV, or Excel) using the sidebar
-2. Or click **Object** / **Summary** / **Cluster** demo buttons
-3. Use **filters** in the sidebar to subset your data
-4. Use **Data Processing** tab to clean data (de-zero, outlier removal)
-5. Build **interactive plots** with the Plot Builder
-6. **Download** individual figures (PNG/SVG) or a full PDF report
+            <div class="getting-started-grid">
+                <div class="gs-card">
+                    <div class="gs-icon">📂</div>
+                    <h4>Upload Histology Data</h4>
+                    <p>Import CSV, TSV, or Excel files exported from histology software. Auto-detects object, summary, or cluster data types.</p>
+                </div>
+                <div class="gs-card">
+                    <div class="gs-icon">🧪</div>
+                    <h4>Try Demo Data</h4>
+                    <p>Click <strong>Object</strong>, <strong>Summary</strong>, or <strong>Cluster</strong> in the sidebar to explore with sample data.</p>
+                </div>
+                <div class="gs-card">
+                    <div class="gs-icon">🧬</div>
+                    <h4>Add Metadata</h4>
+                    <p>Map samples to experimental factors (Treatment, Genotype, Subject ID, Timepoint) for biological analysis.</p>
+                </div>
+                <div class="gs-card">
+                    <div class="gs-icon">📊</div>
+                    <h4>Build Plots</h4>
+                    <p>Create interactive visualizations: Bar, Scatter, Box, Violin, Strip, Heatmap, Pairplot, and more.</p>
+                </div>
+                <div class="gs-card">
+                    <div class="gs-icon">🔬</div>
+                    <h4>Process Data</h4>
+                    <p>Clean data with de-zero filtering and outlier removal (IQR, percentile, std dev, winsorize).</p>
+                </div>
+                <div class="gs-card">
+                    <div class="gs-icon">📄</div>
+                    <h4>Export Reports</h4>
+                    <p>Download individual plots as PNG/SVG, or compile a multi-figure PDF report for publication.</p>
+                </div>
+            </div>
 
-#### Supported HALO Data Types
-- **Summary Data**: HALO analysis output (Algorithm Name, Job Id, Image Tag, cell counts, %, H-Scores)
-- **Object Data**: Cell-by-cell exports (Cell ID, coordinates, marker intensities, phenotypes)
-- **Cluster Data**: Aggregated object data (Total Cluster Count, Region Area, cell fractions)
+            <div style="margin-top: 1rem;">
+                <div style="font-size: 0.75rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem;">Supported Data Types</div>
+                <div class="plot-types-row">
+                    <span class="plot-chip" style="border-color: rgba(129, 199, 132, 0.25); color: #66BB6A;">Object Data</span>
+                    <span class="plot-chip" style="border-color: rgba(79, 195, 247, 0.25); color: #4FC3F7;">Summary Data</span>
+                    <span class="plot-chip" style="border-color: rgba(255, 183, 77, 0.25); color: #FFB74D;">Cluster Data</span>
+                </div>
+            </div>
 
-#### Column Classification (anima-compatible)
-Auto-detects columns following `HaloAnalysis.set_analysis_metrics()` logic:
-Intensity, Cell/Total/Fraction, Phenotype vs Channel, Spatial/Coordinate/Area
-
-#### Plot Types
-Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatmap, Pairplot, Sample Overview
+            <div style="margin-top: 0.8rem;">
+                <div style="font-size: 0.75rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem;">Available Plot Types</div>
+                <div class="plot-types-row">
+                    <span class="plot-chip">Bar Chart</span>
+                    <span class="plot-chip">Stacked Bar</span>
+                    <span class="plot-chip">Scatter Plot</span>
+                    <span class="plot-chip">Box Plot</span>
+                    <span class="plot-chip">Violin Plot</span>
+                    <span class="plot-chip">Strip Plot</span>
+                    <span class="plot-chip">Swarm Plot</span>
+                    <span class="plot-chip">Histogram</span>
+                    <span class="plot-chip">XY Line</span>
+                    <span class="plot-chip">Heatmap</span>
+                    <span class="plot-chip">Pairplot Matrix</span>
+                    <span class="plot-chip">Sample Overview</span>
+                </div>
+            </div>
             """)
         return
 
@@ -420,7 +613,7 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
         row_label = "Loaded Rows"
         row_value = f"{len(filtered_df):,} of {ds.total_rows:,}"
 
-    with ui.row().classes("w-full gap-4 mb-4"):
+    with ui.row().classes("w-full gap-3 mb-4"):
         for label, value in [
             (row_label, row_value),
             ("Data Type", ds.data_type.title()),
@@ -428,16 +621,16 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
             ("Samples", str(len(ds.sample_ids)) if ds.sample_ids else "N/A"),
             ("Memory", f"{get_memory_usage_mb(ds.df):.1f} MB"),
         ]:
-            with ui.card().classes("flex-1"):
+            with ui.element("div").classes("flex-1"):
                 ui.html(f'<div class="metric-card"><div class="value">{value}</div><div class="label">{label}</div></div>')
 
     with ui.tabs().classes("w-full") as tabs:
-        plot_tab = ui.tab("Plot Builder")
-        metadata_tab = ui.tab("Metadata & Aggregation")
-        process_tab = ui.tab("Data Processing")
-        table_tab = ui.tab("Data Table")
-        stats_tab = ui.tab("Statistics")
-        report_tab = ui.tab("Report")
+        plot_tab = ui.tab("Plot Builder", icon="bar_chart")
+        metadata_tab = ui.tab("Metadata", icon="biotech")
+        process_tab = ui.tab("Processing", icon="cleaning_services")
+        table_tab = ui.tab("Data Table", icon="table_chart")
+        stats_tab = ui.tab("Statistics", icon="analytics")
+        report_tab = ui.tab("Report", icon="picture_as_pdf")
 
     with ui.tab_panels(tabs, value=plot_tab).classes("w-full"):
 
@@ -445,8 +638,11 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
         with ui.tab_panel(plot_tab):
             with ui.row().classes("w-full gap-4"):
                 with ui.column().classes("w-80 shrink-0"):
-                    with ui.card().classes("w-full p-4"):
-                        ui.label("Plot Configuration").classes("text-lg font-bold mb-2")
+                    with ui.card().classes("w-full p-4").style(
+                        "background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); "
+                        "border: 1px solid rgba(99, 179, 237, 0.1); border-radius: 12px;"
+                    ):
+                        ui.label("Plot Configuration").classes("text-lg font-bold mb-2").style("color: #e2e8f0;")
 
                         plot_type_sel = ui.select(PLOT_TYPES, label="Plot Type", value="Bar Chart").classes("w-full")
 
@@ -609,7 +805,7 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
                         def do_merge():
                             try:
                                 merged_df = merge_metadata(filtered_df, meta)
-                                state.dataset = parse_halo_data(
+                                state.dataset = parse_histology_data(
                                     merged_df, ds.filename,
                                     force_type=ds.data_type,
                                     file_size_mb=ds.file_size_mb,
@@ -626,7 +822,7 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
                             except Exception as ex:
                                 ui.notify(f"Merge failed: {ex}", type="negative")
 
-                        ui.button("Merge Metadata into HALO Data",
+                        ui.button("Merge Metadata into Histology Data",
                                   on_click=do_merge, color="primary").classes("w-full mt-4")
                     else:
                         ui.label("No Metadata Loaded").classes("text-lg font-bold")
@@ -692,7 +888,7 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
 
                             with ui.row().classes("gap-4 mt-4"):
                                 def use_agg():
-                                    state.dataset = parse_halo_data(
+                                    state.dataset = parse_histology_data(
                                         state.aggregated_df,
                                         f"{ds.filename}_aggregated",
                                         force_type="summary",
@@ -731,7 +927,7 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
                         before = len(filtered_df)
                         cleaned = dezero(filtered_df, dezero_sel.value)
                         removed = before - len(cleaned)
-                        state.dataset = parse_halo_data(cleaned, ds.filename, force_type=ds.data_type)
+                        state.dataset = parse_histology_data(cleaned, ds.filename, force_type=ds.data_type)
                         state.filters = {}
                         ui.notify(f"Removed {removed} rows. {len(cleaned)} remaining.", type="positive")
                         main_content.refresh()
@@ -770,7 +966,7 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
                             method=out_method_sel.value, factor=iqr_factor.value,
                             std_factor=iqr_factor.value,
                         )
-                        state.dataset = parse_halo_data(cleaned, ds.filename, force_type=ds.data_type)
+                        state.dataset = parse_histology_data(cleaned, ds.filename, force_type=ds.data_type)
                         state.filters = {}
                         ui.notify(f"Applied. {len(cleaned)} rows remaining.", type="positive")
                         main_content.refresh()
@@ -878,12 +1074,13 @@ def index():
         ui.html("""
         <div class="homer-header">
             <h1>HOMER</h1>
-            <p>Halo Output Mapper &amp; Explorer for Research</p>
+            <p>Histology Output Mapper &amp; Explorer for Research</p>
+            <span class="version-tag">v1.0</span>
         </div>
         """)
 
-    with ui.left_drawer(value=True).classes("bg-gray-50 p-4"):
-        ui.label("Data Upload").classes("text-lg font-bold mb-2")
+    with ui.left_drawer(value=True).classes("p-4").style("background: #0f172a;"):
+        ui.html('<div class="sidebar-section-title">Data Upload</div>')
 
         force_type_select = ui.select(
             ["Auto-detect", "Force Object", "Force Summary", "Force Cluster"],
@@ -893,32 +1090,41 @@ def index():
         max_job_cb = ui.checkbox("Latest Job Id only", value=False)
 
         ui.upload(
-            label="Upload HALO data file",
+            label="Upload histology data file",
             auto_upload=True,
             on_upload=lambda e: handle_upload(e, force_type_select, max_job_cb),
         ).classes("w-full").props('accept=".csv,.tsv,.txt,.xlsx,.xls"')
 
         ui.separator()
-        ui.label("Demo Data").classes("text-sm font-bold")
+        ui.html('<div class="sidebar-section-title">Quick Start &mdash; Demo Data</div>')
+
+        with ui.expansion("Simulation Settings", icon="tune").classes("w-full"):
+            demo_n_samples = ui.number("Samples / images", value=8, min=2, max=100, step=1).classes("w-full")
+            demo_n_objects = ui.number("Objects / cells", value=5000, min=100, max=100000, step=500).classes("w-full")
+
         with ui.row().classes("w-full gap-2"):
-            ui.button("Object", on_click=lambda: load_demo("object"), color="primary").props("dense").classes("flex-1")
-            ui.button("Summary", on_click=lambda: load_demo("summary"), color="primary").props("dense").classes("flex-1")
-            ui.button("Cluster", on_click=lambda: load_demo("cluster"), color="primary").props("dense").classes("flex-1")
+            ui.button("Object", on_click=lambda: load_demo("object", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
+            ui.button("Summary", on_click=lambda: load_demo("summary", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
+            ui.button("Cluster", on_click=lambda: load_demo("cluster", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
 
         ui.separator()
         sidebar_info()
 
-    with ui.column().classes("w-full p-4"):
+    with ui.column().classes("w-full p-4").style("background: #0f172a; min-height: 100vh;"):
         main_content()
 
-    with ui.footer().classes("bg-blue-800 text-white text-center p-2"):
-        ui.label("Homer v1.0 | HALO Data Dashboard | Built with NiceGUI").classes("text-sm")
+    with ui.footer().classes("text-center p-2").style(
+        "background: linear-gradient(180deg, transparent, #0f172a); "
+        "border-top: 1px solid rgba(99, 179, 237, 0.08);"
+    ):
+        ui.label("Homer v1.0  ·  Histology Data Dashboard  ·  Built with NiceGUI").classes("text-xs").style("color: #475569;")
 
 
 ui.run(
-    title="Homer - Halo Data Dashboard",
+    title="Homer - Histology Data Dashboard",
     port=int(os.environ.get("PORT", 8080)),
     host=os.environ.get("HOST", "0.0.0.0"),
     reload=os.environ.get("HOMER_DEV", "").lower() in ("1", "true"),
     storage_secret=os.environ.get("STORAGE_SECRET", "homer-halo-dashboard"),
+    dark=True,
 )

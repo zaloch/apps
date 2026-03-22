@@ -44,7 +44,7 @@ class ReportBuilder:
         ax.text(0.5, 0.7, "HOMER", transform=ax.transAxes,
                 fontsize=48, fontweight="bold", ha="center", va="center",
                 color="#2E86AB")
-        ax.text(0.5, 0.60, "Halo Output Mapper & Explorer for Research",
+        ax.text(0.5, 0.60, "Histology Output Mapper & Explorer for Research",
                 transform=ax.transAxes, fontsize=16, ha="center", va="center",
                 color="#555555")
         ax.text(0.5, 0.45, self.title, transform=ax.transAxes,
