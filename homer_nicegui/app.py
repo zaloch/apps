@@ -1,6 +1,6 @@
-# Homer - Halo Output Mapper & Explorer for Research (NiceGUI Version)
-# A data dashboard for HALO by Indica Labs image analysis data
-# Aligned with anima/HaloAnalysis workflows and column conventions
+# Homer - Histology Output Mapper & Explorer for Research (NiceGUI Version)
+# A data dashboard for histology image analysis data
+# Aligned with anima/HistologyAnalysis workflows and column conventions
 __author__ = "Gonzalo Zeballos"
 __license__ = "GNU GPLv3"
 __version__ = "1.0"
@@ -18,10 +18,10 @@ import base64
 import tempfile
 
 from homer_core.data_parser import (
-    load_uploaded_file, load_file, parse_halo_data, apply_filters,
+    load_uploaded_file, load_file, parse_histology_data, apply_filters,
     get_filterable_columns, get_plottable_numeric_columns, get_grouping_columns,
-    get_phenotype_columns, dezero, remove_outliers,
-    HaloDataset,
+    get_phenotype_columns, dezero, remove_outliers, sample_for_plotting,
+    get_memory_usage_mb, HistologyDataset, MAX_INTERACTIVE_ROWS,
 )
 from homer_core.plotting import (
     create_bar_chart, create_stacked_bar_chart, create_scatter_plot,
@@ -33,17 +33,25 @@ from homer_core.plotting import (
 )
 from homer_core.report_generator import ReportBuilder, generate_data_summary_page
 from homer_core.sample_data import generate_object_data, generate_summary_data, generate_cluster_data
+from homer_core.metadata import (
+    load_metadata_csv, merge_metadata, create_empty_metadata,
+    metadata_template_csv, calculate_per_image_percentages,
+    aggregate_object_data, generate_demo_metadata,
+    ExperimentMetadata, STANDARD_METADATA_FIELDS,
+)
 
 
 # ── Application State ────────────────────────────────────────────────────────
 
 class AppState:
     def __init__(self):
-        self.dataset: HaloDataset | None = None
+        self.dataset: HistologyDataset | None = None
         self.filters: dict = {}
         self.report_figures: list[dict] = []
         self.plot_counter: int = 0
         self.current_fig: go.Figure | None = None
+        self.metadata: ExperimentMetadata | None = None
+        self.aggregated_df: pd.DataFrame | None = None
 
 state = AppState()
 
@@ -52,36 +60,170 @@ state = AppState()
 
 HOMER_CSS = """
 <style>
-.homer-header {
-    background: linear-gradient(135deg, #2E86AB 0%, #1a5276 100%);
-    padding: 1.2rem 2rem;
-    border-radius: 10px;
-    color: white;
-    margin-bottom: 1rem;
-}
-.homer-header h1 { margin: 0; font-size: 2rem; font-weight: 700; }
-.homer-header p { margin: 0.2rem 0 0 0; font-size: 0.95rem; opacity: 0.85; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
+body, .q-page, .nicegui-content {
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* ── Header (minimal bar) ──────────────────────────────────────────────── */
+.homer-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.15rem 1rem;
+    margin: 0;
+    border-bottom: 1px solid rgba(99, 179, 237, 0.08);
+    background: #0f172a;
+}
+.homer-header h1 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #4FC3F7, #81D4FA);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.homer-header p {
+    margin: 0;
+    font-size: 0.6rem;
+    color: #64748b;
+    font-weight: 400;
+}
+.homer-header .version-tag {
+    background: rgba(99, 179, 237, 0.08);
+    color: #4FC3F7;
+    padding: 0.05rem 0.35rem;
+    border-radius: 6px;
+    font-size: 0.5rem;
+    font-weight: 600;
+    border: 1px solid rgba(99, 179, 237, 0.1);
+    margin-left: auto;
+}
+
+/* ── Data Badges ────────────────────────────────────────────────────────── */
 .data-badge {
     display: inline-block;
-    padding: 0.2rem 0.6rem;
-    border-radius: 15px;
-    font-size: 0.75rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.7rem;
     font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
-.badge-object { background: #d4edda; color: #155724; }
-.badge-summary { background: #cce5ff; color: #004085; }
-.badge-cluster { background: #fff3cd; color: #856404; }
+.badge-object { background: rgba(129, 199, 132, 0.12); color: #66BB6A; border: 1px solid rgba(129, 199, 132, 0.25); }
+.badge-summary { background: rgba(79, 195, 247, 0.12); color: #4FC3F7; border: 1px solid rgba(79, 195, 247, 0.25); }
+.badge-cluster { background: rgba(255, 183, 77, 0.12); color: #FFB74D; border: 1px solid rgba(255, 183, 77, 0.25); }
 
+/* ── Metric Cards ───────────────────────────────────────────────────────── */
 .metric-card {
-    background: #f8f9fa;
-    padding: 0.8rem;
-    border-radius: 8px;
-    border-left: 4px solid #2E86AB;
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    padding: 1.1rem 1.3rem;
+    border-radius: 12px;
+    border: 1px solid rgba(99, 179, 237, 0.1);
     text-align: center;
+    transition: transform 0.2s ease, border-color 0.2s ease;
 }
-.metric-card .value { font-size: 1.5rem; font-weight: 700; color: #2E86AB; }
-.metric-card .label { font-size: 0.8rem; color: #666; }
+.metric-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(99, 179, 237, 0.3);
+}
+.metric-card .value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #4FC3F7;
+    line-height: 1.2;
+}
+.metric-card .label {
+    font-size: 0.7rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 0.25rem;
+}
+
+/* ── Getting Started Cards ──────────────────────────────────────────────── */
+.getting-started-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+.gs-card {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border: 1px solid rgba(99, 179, 237, 0.1);
+    border-radius: 12px;
+    padding: 1.3rem;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.gs-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(99, 179, 237, 0.25);
+}
+.gs-card .gs-icon { font-size: 1.6rem; margin-bottom: 0.5rem; }
+.gs-card h4 { margin: 0 0 0.3rem 0; font-size: 0.95rem; font-weight: 600; color: #e2e8f0; }
+.gs-card p { margin: 0; font-size: 0.8rem; color: #94a3b8; line-height: 1.5; }
+
+/* ── Workflow Steps ──────────────────────────────────────────────────────── */
+.workflow-steps {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 1rem 0;
+}
+.workflow-step {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(30, 41, 59, 0.8);
+    padding: 0.4rem 0.8rem;
+    border-radius: 20px;
+    border: 1px solid rgba(99, 179, 237, 0.08);
+    font-size: 0.75rem;
+    color: #cbd5e1;
+}
+.workflow-step .step-num {
+    background: rgba(79, 195, 247, 0.15);
+    color: #4FC3F7;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+/* ── Plot Chips ──────────────────────────────────────────────────────────── */
+.plot-types-row { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.6rem; }
+.plot-chip {
+    background: rgba(30, 41, 59, 0.9);
+    border: 1px solid rgba(99, 179, 237, 0.1);
+    padding: 0.25rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    color: #94a3b8;
+    font-weight: 500;
+}
+
+/* ── Section Title ──────────────────────────────────────────────────────── */
+.sidebar-section-title {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    margin-top: 0.8rem;
+    margin-bottom: 0.3rem;
+}
+
+/* ── Sidebar Tweaks ─────────────────────────────────────────────────────── */
+.q-drawer { border-right: 1px solid rgba(99, 179, 237, 0.08) !important; }
+
+/* ── Tab Tweaks ──────────────────────────────────────────────────────────── */
+.q-tabs--dense .q-tab { min-height: 40px; }
 </style>
 """
 
@@ -99,12 +241,17 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
     try:
         content = e.content.read()
         filename = e.name
+        file_size_mb = len(content) / (1024 * 1024)
         suffix = os.path.splitext(filename)[1]
+
+        if file_size_mb > 50:
+            ui.notify(f"Large file ({file_size_mb:.0f} MB). Loading with memory optimization...", type="info")
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
 
-        df = load_file(tmp_path)
+        df, actual_file_size_mb, total_rows = load_file(tmp_path)
         os.unlink(tmp_path)
 
         ft = None
@@ -116,27 +263,63 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
         elif "Cluster" in force_val:
             ft = "cluster"
 
-        state.dataset = parse_halo_data(df, filename, force_type=ft, max_job=max_job_cb.value)
+        state.dataset = parse_histology_data(
+            df, filename, force_type=ft, max_job=max_job_cb.value,
+            file_size_mb=actual_file_size_mb, total_rows=total_rows,
+        )
         state.filters = {}
-        ui.notify(f"Loaded {filename}: {len(df):,} rows, {len(df.columns)} columns", type="positive")
+
+        msg = f"Loaded {filename}: {len(df):,} rows, {len(df.columns)} columns"
+        if state.dataset.is_sampled:
+            msg += f" (sampled from {total_rows:,} total rows)"
+        ui.notify(msg, type="positive")
         main_content.refresh()
         sidebar_info.refresh()
     except Exception as ex:
         ui.notify(f"Error loading file: {ex}", type="negative")
 
 
-def load_demo(demo_type: str):
+def load_demo(demo_type: str, n_samples: int = 8, n_objects: int = 5000, auto_agg: bool = True):
     if demo_type == "object":
-        df = generate_object_data(n_cells=5000, n_images=3)
-        state.dataset = parse_halo_data(df, "demo_object_data.csv", force_type="object")
+        df = generate_object_data(n_cells=n_objects, n_images=n_samples)
+        dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
+        state.dataset = dataset
+        state.filters = {}
+
+        if auto_agg:
+            group_cols = []
+            for col in ["Sample ID", "Analysis Region"]:
+                if col in df.columns:
+                    group_cols.append(col)
+            meta_factors = ["Treatment Group", "Genotype", "Timepoint",
+                            "Subject ID", "Sex", "Age", "Dose", "Cohort"]
+            for col in meta_factors:
+                if col in df.columns and col not in group_cols:
+                    group_cols.append(col)
+
+            agg_df = aggregate_object_data(
+                df,
+                group_cols=group_cols,
+                classification_cols=dataset.classification_columns,
+                phenotype_combo_cols=dataset.phenotype_combo_columns,
+                intensity_cols=(dataset.nucleus_intensity_columns +
+                                dataset.cell_intensity_columns),
+                morphology_cols=dataset.morphology_columns,
+            )
+            state.aggregated_df = agg_df
+            state.dataset = parse_histology_data(
+                agg_df, "demo_object_data_aggregated.csv",
+                force_type="summary",
+            )
     elif demo_type == "summary":
-        df = generate_summary_data(n_images=12)
-        state.dataset = parse_halo_data(df, "demo_summary_data.csv")
+        df = generate_summary_data(n_images=n_samples)
+        state.dataset = parse_histology_data(df, "demo_summary_data.csv")
+        state.filters = {}
     elif demo_type == "cluster":
-        df = generate_cluster_data(n_clusters=200, n_images=4)
-        state.dataset = parse_halo_data(df, "demo_cluster_data.csv", force_type="cluster")
-    state.filters = {}
-    ui.notify(f"Loaded {demo_type} demo data", type="positive")
+        df = generate_cluster_data(n_clusters=n_objects, n_images=n_samples)
+        state.dataset = parse_histology_data(df, "demo_cluster_data.csv", force_type="cluster")
+        state.filters = {}
+    ui.notify(f"Loaded {demo_type} demo data ({n_samples} samples)", type="positive")
     main_content.refresh()
     sidebar_info.refresh()
 
@@ -219,6 +402,13 @@ def generate_plot(
     plot_df = filtered_df.copy()
     color = color_col if color_col and color_col != "(None)" else None
 
+    # Downsample for performance on point-heavy plot types
+    if len(plot_df) > 50_000 and plot_type in (
+        "Scatter Plot", "Strip Plot", "Swarm Plot", "Pairplot Matrix",
+    ):
+        plot_df = sample_for_plotting(plot_df, max_points=50_000, stratify_col=color)
+        ui.notify(f"Showing {len(plot_df):,} sampled points for performance", type="info")
+
     try:
         if plot_type in ("Bar Chart", "Stacked Bar Chart") and y_col and x_col:
             group_cols = [x_col]
@@ -297,10 +487,17 @@ def sidebar_info():
     badge_class = badge_map.get(ds.data_type, "badge-summary")
     ui.html(f'<span class="data-badge {badge_class}">{ds.data_type.upper()} DATA</span>')
     ui.label(f"File: {ds.filename}").classes("text-sm text-gray-600")
+    if ds.file_size_mb > 0:
+        ui.label(f"File Size: {ds.file_size_mb:.1f} MB").classes("text-sm text-gray-500")
 
     filtered_df = apply_filters(ds.df, state.filters)
-    ui.label(f"Rows: {len(filtered_df):,} / {len(ds.df):,}").classes("text-sm")
+    if ds.is_sampled:
+        ui.label(f"Rows: {len(filtered_df):,} / {len(ds.df):,} (of {ds.total_rows:,})").classes("text-sm")
+    else:
+        ui.label(f"Rows: {len(filtered_df):,} / {len(ds.df):,}").classes("text-sm")
     ui.label(f"Columns: {len(ds.df.columns)}").classes("text-sm")
+    mem_mb = get_memory_usage_mb(ds.df)
+    ui.label(f"Memory: {mem_mb:.1f} MB").classes("text-sm text-gray-500")
 
     if ds.algorithm_names:
         ui.label(f"Algorithms: {len(ds.algorithm_names)}").classes("text-sm")
@@ -348,28 +545,75 @@ def sidebar_info():
 @ui.refreshable
 def main_content():
     if state.dataset is None:
-        with ui.card().classes("w-full max-w-3xl mx-auto mt-8 p-8"):
-            ui.markdown("""
-### Getting Started
+        with ui.column().classes("w-full max-w-5xl mx-auto mt-6 px-4"):
+            ui.html("""
+            <div class="workflow-steps">
+                <div class="workflow-step"><span class="step-num">1</span> Upload data</div>
+                <div class="workflow-step"><span class="step-num">2</span> Add metadata</div>
+                <div class="workflow-step"><span class="step-num">3</span> Merge &amp; aggregate</div>
+                <div class="workflow-step"><span class="step-num">4</span> Plot &amp; explore</div>
+                <div class="workflow-step"><span class="step-num">5</span> Export report</div>
+            </div>
 
-1. **Upload** a HALO data file (CSV, TSV, or Excel) using the sidebar
-2. Or click **Object** / **Summary** / **Cluster** demo buttons
-3. Use **filters** in the sidebar to subset your data
-4. Use **Data Processing** tab to clean data (de-zero, outlier removal)
-5. Build **interactive plots** with the Plot Builder
-6. **Download** individual figures (PNG/SVG) or a full PDF report
+            <div class="getting-started-grid">
+                <div class="gs-card">
+                    <div class="gs-icon">📂</div>
+                    <h4>Upload Histology Data</h4>
+                    <p>Import CSV, TSV, or Excel files exported from histology software. Auto-detects object, summary, or cluster data types.</p>
+                </div>
+                <div class="gs-card">
+                    <div class="gs-icon">🧪</div>
+                    <h4>Try Demo Data</h4>
+                    <p>Click <strong>Object</strong>, <strong>Summary</strong>, or <strong>Cluster</strong> in the sidebar to explore with sample data.</p>
+                </div>
+                <div class="gs-card">
+                    <div class="gs-icon">🧬</div>
+                    <h4>Add Metadata</h4>
+                    <p>Map samples to experimental factors (Treatment, Genotype, Subject ID, Timepoint) for biological analysis.</p>
+                </div>
+                <div class="gs-card">
+                    <div class="gs-icon">📊</div>
+                    <h4>Build Plots</h4>
+                    <p>Create interactive visualizations: Bar, Scatter, Box, Violin, Strip, Heatmap, Pairplot, and more.</p>
+                </div>
+                <div class="gs-card">
+                    <div class="gs-icon">🔬</div>
+                    <h4>Process Data</h4>
+                    <p>Clean data with de-zero filtering and outlier removal (IQR, percentile, std dev, winsorize).</p>
+                </div>
+                <div class="gs-card">
+                    <div class="gs-icon">📄</div>
+                    <h4>Export Reports</h4>
+                    <p>Download individual plots as PNG/SVG, or compile a multi-figure PDF report for publication.</p>
+                </div>
+            </div>
 
-#### Supported HALO Data Types
-- **Summary Data**: HALO analysis output (Algorithm Name, Job Id, Image Tag, cell counts, %, H-Scores)
-- **Object Data**: Cell-by-cell exports (Cell ID, coordinates, marker intensities, phenotypes)
-- **Cluster Data**: Aggregated object data (Total Cluster Count, Region Area, cell fractions)
+            <div style="margin-top: 1rem;">
+                <div style="font-size: 0.75rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem;">Supported Data Types</div>
+                <div class="plot-types-row">
+                    <span class="plot-chip" style="border-color: rgba(129, 199, 132, 0.25); color: #66BB6A;">Object Data</span>
+                    <span class="plot-chip" style="border-color: rgba(79, 195, 247, 0.25); color: #4FC3F7;">Summary Data</span>
+                    <span class="plot-chip" style="border-color: rgba(255, 183, 77, 0.25); color: #FFB74D;">Cluster Data</span>
+                </div>
+            </div>
 
-#### Column Classification (anima-compatible)
-Auto-detects columns following `HaloAnalysis.set_analysis_metrics()` logic:
-Intensity, Cell/Total/Fraction, Phenotype vs Channel, Spatial/Coordinate/Area
-
-#### Plot Types
-Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatmap, Pairplot, Sample Overview
+            <div style="margin-top: 0.8rem;">
+                <div style="font-size: 0.75rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem;">Available Plot Types</div>
+                <div class="plot-types-row">
+                    <span class="plot-chip">Bar Chart</span>
+                    <span class="plot-chip">Stacked Bar</span>
+                    <span class="plot-chip">Scatter Plot</span>
+                    <span class="plot-chip">Box Plot</span>
+                    <span class="plot-chip">Violin Plot</span>
+                    <span class="plot-chip">Strip Plot</span>
+                    <span class="plot-chip">Swarm Plot</span>
+                    <span class="plot-chip">Histogram</span>
+                    <span class="plot-chip">XY Line</span>
+                    <span class="plot-chip">Heatmap</span>
+                    <span class="plot-chip">Pairplot Matrix</span>
+                    <span class="plot-chip">Sample Overview</span>
+                </div>
+            </div>
             """)
         return
 
@@ -380,98 +624,313 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
     phenotype_cols = get_phenotype_columns(ds)
 
     # Metrics row
-    with ui.row().classes("w-full gap-4 mb-4"):
+    row_label = "Total Rows"
+    row_value = f"{len(filtered_df):,}"
+    if ds.is_sampled:
+        row_label = "Loaded Rows"
+        row_value = f"{len(filtered_df):,} of {ds.total_rows:,}"
+
+    with ui.row().classes("w-full gap-3 mb-4"):
         for label, value in [
-            ("Total Rows", f"{len(filtered_df):,}"),
+            (row_label, row_value),
             ("Data Type", ds.data_type.title()),
             ("Numeric Cols", str(len(ds.numeric_columns))),
             ("Samples", str(len(ds.sample_ids)) if ds.sample_ids else "N/A"),
+            ("Memory", f"{get_memory_usage_mb(ds.df):.1f} MB"),
         ]:
-            with ui.card().classes("flex-1"):
+            with ui.element("div").classes("flex-1"):
                 ui.html(f'<div class="metric-card"><div class="value">{value}</div><div class="label">{label}</div></div>')
 
     with ui.tabs().classes("w-full") as tabs:
-        plot_tab = ui.tab("Plot Builder")
-        process_tab = ui.tab("Data Processing")
-        table_tab = ui.tab("Data Table")
-        stats_tab = ui.tab("Statistics")
-        report_tab = ui.tab("Report")
+        table_tab = ui.tab("Data Table", icon="table_chart")
+        metadata_tab = ui.tab("Metadata", icon="biotech")
+        process_tab = ui.tab("Processing", icon="cleaning_services")
+        stats_tab = ui.tab("Statistics", icon="analytics")
+        plot_tab = ui.tab("Plot Builder", icon="bar_chart")
+        multi_plot_tab = ui.tab("Multi Plot", icon="dashboard")
+        report_tab = ui.tab("Report", icon="picture_as_pdf")
 
-    with ui.tab_panels(tabs, value=plot_tab).classes("w-full"):
+    with ui.tab_panels(tabs, value=table_tab).classes("w-full"):
 
         # ── Plot Builder ─────────────────────────────────────────────
         with ui.tab_panel(plot_tab):
-            with ui.row().classes("w-full gap-4"):
-                with ui.column().classes("w-80 shrink-0"):
-                    with ui.card().classes("w-full p-4"):
-                        ui.label("Plot Configuration").classes("text-lg font-bold mb-2")
+            # Plot area (full width, top)
+            plot_display = ui.column().classes("w-full")
+            with plot_display:
+                ui.label("Configure and click Generate to see your plot here.").classes("text-gray-400 text-center mt-4")
 
-                        plot_type_sel = ui.select(PLOT_TYPES, label="Plot Type", value="Bar Chart").classes("w-full")
+            # Download / report row
+            with ui.row().classes("w-full gap-2 mt-1"):
+                ui.button("PNG", on_click=download_png, color="secondary").props("dense")
+                ui.button("SVG", on_click=download_svg, color="secondary").props("dense")
 
-                        x_options = grouping_cols + numeric_cols
-                        y_options = numeric_cols
-                        color_options = ["(None)"] + grouping_cols
+                # title_input defined below but referenced here via closure
+                title_ref = {"value": ""}
+                ui.button("Add to Report",
+                          on_click=lambda: add_to_report(title_ref["value"]),
+                          color="accent").props("dense")
 
-                        x_sel = ui.select(x_options, label="X Axis",
-                                          value=x_options[0] if x_options else None).classes("w-full")
-                        y_sel = ui.select(y_options, label="Y Axis",
-                                          value=y_options[0] if y_options else None).classes("w-full")
-                        color_sel = ui.select(color_options, label="Color / Group By",
-                                              value="(None)").classes("w-full")
+            # Collapsible config panel
+            with ui.expansion("Plot Configuration", icon="tune", value=True).classes("w-full mt-2"):
+                x_options = grouping_cols + numeric_cols
+                y_options = numeric_cols
+                color_options = ["(None)"] + grouping_cols
 
-                        # Pairplot columns
+                with ui.row().classes("w-full gap-4"):
+                    plot_type_sel = ui.select(PLOT_TYPES, label="Plot Type", value="Bar Chart").classes("w-48")
+                    x_sel = ui.select(x_options, label="X Axis",
+                                      value=x_options[0] if x_options else None).classes("flex-1")
+                    y_sel = ui.select(y_options, label="Y Axis",
+                                      value=y_options[0] if y_options else None).classes("flex-1")
+                    color_sel = ui.select(color_options, label="Color / Group",
+                                          value="(None)").classes("w-48")
+
+                with ui.row().classes("w-full gap-4"):
+                    title_input = ui.input("Chart Title", value="").classes("flex-1")
+                    title_input.on("update:model-value", lambda e: title_ref.update({"value": e.args}))
+                    agg_sel = ui.select(["mean", "median", "sum", "count"],
+                                        label="Aggregation", value="mean").classes("w-40")
+                    orient_sel = ui.select(["v", "h"], label="Orient", value="v").classes("w-24")
+                    barmode_sel = ui.select(["group", "overlay"], label="Bar Mode", value="group").classes("w-32")
+
+                with ui.expansion("More Options", icon="settings").classes("w-full"):
+                    with ui.row().classes("w-full gap-4"):
+                        normalize_cb = ui.checkbox("Normalize to 100%", value=False)
+                        trendline_sel = ui.select([None, "ols", "lowess"], label="Trendline", value=None).classes("w-40")
+                        points_sel = ui.select(["outliers", "all", "suspectedoutliers"],
+                                                label="Show Points", value="outliers").classes("w-40")
+                        nbins_slider = ui.slider(min=10, max=200, value=50).props("label").classes("w-48")
+                        ui.label("Bins").classes("text-xs")
+
+                    # Pairplot / Sample Overview
+                    with ui.row().classes("w-full gap-4"):
                         default_pair = phenotype_cols[:5] if phenotype_cols else numeric_cols[:5]
                         pair_sel = ui.select(numeric_cols, multiple=True, label="Pairplot Columns",
-                                             value=default_pair).classes("w-full")
-
-                        # Sample overview
+                                             value=default_pair).classes("flex-1")
                         sample_col_sel = ui.select(grouping_cols, label="Sample Column",
-                                                    value="Sample ID" if "Sample ID" in grouping_cols else (grouping_cols[0] if grouping_cols else None)).classes("w-full")
+                                                    value="Sample ID" if "Sample ID" in grouping_cols else (grouping_cols[0] if grouping_cols else None)).classes("w-48")
                         overview_sel = ui.select(numeric_cols, multiple=True, label="Overview Metrics",
-                                                  value=phenotype_cols[:4] if phenotype_cols else numeric_cols[:4]).classes("w-full")
+                                                  value=phenotype_cols[:4] if phenotype_cols else numeric_cols[:4]).classes("flex-1")
 
-                        title_input = ui.input("Chart Title", value="").classes("w-full")
+                def on_generate():
+                    title_ref["value"] = title_input.value
+                    generate_plot(
+                        plot_type_sel.value, x_sel.value, y_sel.value,
+                        color_sel.value, title_input.value,
+                        orient_sel.value, barmode_sel.value,
+                        normalize_cb.value, trendline_sel.value,
+                        points_sel.value, int(nbins_slider.value),
+                        agg_sel.value, plot_display,
+                        pair_cols=pair_sel.value,
+                        sample_col=sample_col_sel.value,
+                        overview_metrics=overview_sel.value,
+                    )
 
-                        with ui.expansion("Advanced Options", icon="settings").classes("w-full"):
-                            orient_sel = ui.select(["v", "h"], label="Orientation", value="v").classes("w-full")
-                            barmode_sel = ui.select(["group", "overlay"], label="Bar Mode", value="group").classes("w-full")
-                            normalize_cb = ui.checkbox("Normalize to 100%", value=False)
-                            trendline_sel = ui.select([None, "ols", "lowess"], label="Trendline", value=None).classes("w-full")
-                            points_sel = ui.select(["outliers", "all", "suspectedoutliers"],
-                                                    label="Show Points", value="outliers").classes("w-full")
-                            nbins_slider = ui.slider(min=10, max=200, value=50).props("label")
-                            ui.label("Number of bins").classes("text-xs")
-                            agg_sel = ui.select(["mean", "median", "sum", "count"],
-                                                label="Aggregation", value="mean").classes("w-full")
+                ui.button("Generate Plot", on_click=on_generate, color="primary").classes("w-full mt-2")
 
-                        plot_container_ref = ui.column().classes("hidden")
+        # ── Metadata & Aggregation ──────────────────────────────────
+        with ui.tab_panel(metadata_tab):
+            ui.label("Experimental Metadata").classes("text-xl font-bold")
+            ui.label(
+                "Map each image/sample to experimental factors (Subject ID, Treatment, "
+                "Genotype, Timepoint, etc.) then aggregate and plot by these factors."
+            ).classes("text-sm text-gray-500 mb-4")
 
-                        def on_generate():
-                            generate_plot(
-                                plot_type_sel.value, x_sel.value, y_sel.value,
-                                color_sel.value, title_input.value,
-                                orient_sel.value, barmode_sel.value,
-                                normalize_cb.value, trendline_sel.value,
-                                points_sel.value, int(nbins_slider.value),
-                                agg_sel.value, plot_display,
-                                pair_cols=pair_sel.value,
-                                sample_col=sample_col_sel.value,
-                                overview_metrics=overview_sel.value,
+            with ui.row().classes("w-full gap-8"):
+                # ── Upload metadata CSV ──
+                with ui.card().classes("flex-1 p-4"):
+                    ui.label("Upload Metadata CSV").classes("text-lg font-bold")
+                    ui.label(
+                        "CSV with one row per sample. Must include a Sample ID column."
+                    ).classes("text-sm text-gray-500")
+
+                    async def handle_meta_upload(e: events.UploadEventArguments):
+                        try:
+                            content = e.content.read()
+                            meta_io = BytesIO(content)
+                            meta = load_metadata_csv(meta_io, filename=e.name)
+                            state.metadata = meta
+                            ui.notify(
+                                f"Loaded metadata: {len(meta.df)} samples, "
+                                f"factors: {', '.join(meta.factor_columns)}",
+                                type="positive",
                             )
+                            main_content.refresh()
+                        except Exception as ex:
+                            ui.notify(f"Error loading metadata: {ex}", type="negative")
 
-                        ui.button("Generate Plot", on_click=on_generate, color="primary").classes("w-full mt-2")
+                    ui.upload(
+                        label="Upload metadata CSV",
+                        auto_upload=True,
+                        on_upload=handle_meta_upload,
+                    ).classes("w-full").props('accept=".csv,.tsv,.xlsx"')
 
-                        with ui.row().classes("w-full gap-2 mt-2"):
-                            ui.button("PNG", on_click=download_png, color="secondary").classes("flex-1").props("dense")
-                            ui.button("SVG", on_click=download_svg, color="secondary").classes("flex-1").props("dense")
-                            ui.button("Add to Report",
-                                      on_click=lambda: add_to_report(title_input.value),
-                                      color="accent").classes("flex-1").props("dense")
+                    # Demo metadata
+                    if ds.sample_ids:
+                        def load_demo_meta():
+                            demo_df = generate_demo_metadata(ds.sample_ids)
+                            state.metadata = ExperimentMetadata(
+                                df=demo_df,
+                                join_key="Sample ID",
+                                factor_columns=[c for c in demo_df.columns if c != "Sample ID"],
+                                filename="demo_metadata.csv",
+                            )
+                            ui.notify("Loaded demo metadata", type="positive")
+                            main_content.refresh()
 
-                with ui.column().classes("flex-1 min-w-0"):
-                    plot_display = ui.column().classes("w-full")
-                    with plot_display:
-                        ui.label("Configure and generate a plot to see it here.").classes("text-gray-400 text-center mt-8")
+                        ui.button("Load Demo Metadata", on_click=load_demo_meta,
+                                  color="secondary").classes("w-full mt-2")
+
+                    # Download template
+                    if ds.sample_ids:
+                        def dl_template():
+                            csv_str = metadata_template_csv(ds.sample_ids)
+                            b64 = base64.b64encode(csv_str.encode()).decode()
+                            ui.download(src=f"data:text/csv;base64,{b64}",
+                                        filename="metadata_template.csv")
+
+                        ui.button("Download Template CSV", on_click=dl_template,
+                                  color="secondary").classes("w-full mt-2").props("dense")
+
+                # ── Current metadata status ──
+                with ui.card().classes("flex-1 p-4"):
+                    if state.metadata is not None:
+                        meta = state.metadata
+                        ui.label("Current Metadata").classes("text-lg font-bold")
+
+                        with ui.row().classes("gap-4 mb-4"):
+                            ui.html(f'<div class="metric-card"><div class="value">{len(meta.df)}</div><div class="label">Samples</div></div>')
+                            ui.html(f'<div class="metric-card"><div class="value">{len(meta.factor_columns)}</div><div class="label">Factors</div></div>')
+                            matched = set(meta.df[meta.join_key].astype(str)) & set(str(s) for s in ds.sample_ids)
+                            ui.html(f'<div class="metric-card"><div class="value">{len(matched)}/{len(ds.sample_ids)}</div><div class="label">Matched</div></div>')
+
+                        ui.label(f"Join key: {meta.join_key}").classes("text-sm")
+                        ui.label(f"Factors: {', '.join(meta.factor_columns)}").classes("text-sm text-gray-600")
+
+                        # Preview table
+                        with ui.expansion("Preview Metadata").classes("w-full"):
+                            meta_cols_def = [{"headerName": c, "field": c, "sortable": True}
+                                             for c in meta.df.columns]
+                            meta_rows = meta.df.to_dict("records")
+                            ui.aggrid({
+                                "columnDefs": meta_cols_def,
+                                "rowData": meta_rows,
+                                "defaultColDef": {"flex": 1, "minWidth": 100},
+                            }).classes("w-full").style("height: 250px")
+
+                        # Merge button
+                        def do_merge():
+                            try:
+                                merged_df = merge_metadata(filtered_df, meta)
+                                state.dataset = parse_histology_data(
+                                    merged_df, ds.filename,
+                                    force_type=ds.data_type,
+                                    file_size_mb=ds.file_size_mb,
+                                    total_rows=ds.total_rows,
+                                )
+                                state.filters = {}
+                                ui.notify(
+                                    f"Merged! {len(meta.factor_columns)} columns added. "
+                                    f"Use {', '.join(meta.factor_columns)} as plot groupings.",
+                                    type="positive",
+                                )
+                                main_content.refresh()
+                                sidebar_info.refresh()
+                            except Exception as ex:
+                                ui.notify(f"Merge failed: {ex}", type="negative")
+
+                        ui.button("Merge Metadata into Histology Data",
+                                  on_click=do_merge, color="primary").classes("w-full mt-4")
+                    else:
+                        ui.label("No Metadata Loaded").classes("text-lg font-bold")
+                        ui.label("Upload a metadata CSV or load demo metadata.").classes("text-sm text-gray-500")
+
+            # ── Object data aggregation ──
+            if ds.data_type == "object" and state.metadata is not None:
+                ui.separator()
+                ui.label("Aggregate Object Data to Per-Image Percentages").classes("text-lg font-bold mt-4")
+                ui.label(
+                    "Convert per-cell binary data into per-image percentages, "
+                    "then plot by Treatment, Genotype, Subject ID, etc."
+                ).classes("text-sm text-gray-500")
+
+                agg_options = []
+                if "Sample ID" in filtered_df.columns:
+                    agg_options.append("Sample ID")
+                if "Analysis Region" in filtered_df.columns:
+                    agg_options.append("Analysis Region")
+                if state.metadata:
+                    for fc in state.metadata.factor_columns:
+                        if fc in filtered_df.columns and fc not in agg_options:
+                            agg_options.append(fc)
+
+                agg_group_sel = ui.select(
+                    agg_options, multiple=True, label="Group by",
+                    value=["Sample ID"] if "Sample ID" in agg_options else agg_options[:1],
+                ).classes("w-full max-w-lg")
+
+                agg_result_container = ui.column().classes("w-full")
+
+                def do_aggregate():
+                    try:
+                        agg_df = aggregate_object_data(
+                            filtered_df,
+                            group_cols=agg_group_sel.value,
+                            classification_cols=ds.classification_columns,
+                            phenotype_combo_cols=ds.phenotype_combo_columns,
+                            intensity_cols=(ds.nucleus_intensity_columns + ds.cell_intensity_columns),
+                            morphology_cols=ds.morphology_columns,
+                        )
+                        state.aggregated_df = agg_df
+                        ui.notify(
+                            f"Aggregated {len(filtered_df):,} objects into {len(agg_df):,} groups",
+                            type="positive",
+                        )
+
+                        agg_result_container.clear()
+                        with agg_result_container:
+                            pct_cols = [c for c in agg_df.columns if c.startswith("% ")]
+                            show_cols = list(agg_group_sel.value) + ["Object Count"] + pct_cols
+                            show_cols = [c for c in show_cols if c in agg_df.columns]
+                            display_agg = agg_df[show_cols]
+
+                            agg_col_defs = [{"headerName": c, "field": c, "sortable": True}
+                                            for c in display_agg.columns]
+                            agg_rows = display_agg.round(2).to_dict("records")
+                            ui.aggrid({
+                                "columnDefs": agg_col_defs,
+                                "rowData": agg_rows,
+                                "defaultColDef": {"flex": 1, "minWidth": 100},
+                            }).classes("w-full").style("height: 300px")
+
+                            with ui.row().classes("gap-4 mt-4"):
+                                def use_agg():
+                                    state.dataset = parse_histology_data(
+                                        state.aggregated_df,
+                                        f"{ds.filename}_aggregated",
+                                        force_type="summary",
+                                    )
+                                    state.filters = {}
+                                    ui.notify("Switched to aggregated data for plotting", type="positive")
+                                    main_content.refresh()
+                                    sidebar_info.refresh()
+
+                                ui.button("Use Aggregated Data for Plotting",
+                                          on_click=use_agg, color="primary")
+
+                                def dl_agg():
+                                    csv_str = state.aggregated_df.to_csv(index=False)
+                                    b64 = base64.b64encode(csv_str.encode()).decode()
+                                    ui.download(src=f"data:text/csv;base64,{b64}",
+                                                filename="homer_aggregated.csv")
+
+                                ui.button("Download Aggregated CSV",
+                                          on_click=dl_agg, color="secondary")
+
+                    except Exception as ex:
+                        ui.notify(f"Aggregation failed: {ex}", type="negative")
+
+                ui.button("Aggregate", on_click=do_aggregate, color="primary").classes("mt-2")
 
         # ── Data Processing ──────────────────────────────────────────
         with ui.tab_panel(process_tab):
@@ -485,7 +944,7 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
                         before = len(filtered_df)
                         cleaned = dezero(filtered_df, dezero_sel.value)
                         removed = before - len(cleaned)
-                        state.dataset = parse_halo_data(cleaned, ds.filename, force_type=ds.data_type)
+                        state.dataset = parse_histology_data(cleaned, ds.filename, force_type=ds.data_type)
                         state.filters = {}
                         ui.notify(f"Removed {removed} rows. {len(cleaned)} remaining.", type="positive")
                         main_content.refresh()
@@ -524,7 +983,7 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
                             method=out_method_sel.value, factor=iqr_factor.value,
                             std_factor=iqr_factor.value,
                         )
-                        state.dataset = parse_halo_data(cleaned, ds.filename, force_type=ds.data_type)
+                        state.dataset = parse_histology_data(cleaned, ds.filename, force_type=ds.data_type)
                         state.filters = {}
                         ui.notify(f"Applied. {len(cleaned)} rows remaining.", type="positive")
                         main_content.refresh()
@@ -596,30 +1055,210 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
                 clean_pheno = get_phenotype_columns(ds, include_weak_strong=False)
                 ui.label(", ".join(clean_pheno[:15])).classes("text-sm text-gray-600")
 
+        # ── Multi Plot Builder ─────────────────────────────────────────
+        with ui.tab_panel(multi_plot_tab):
+            ui.label("Multi Plot Builder").classes("text-lg font-bold")
+            ui.label("Generate multiple plots at once — each Y metric becomes a separate plot.").classes("text-sm text-gray-500 mb-2")
+
+            multi_plot_container = ui.column().classes("w-full")
+
+            with ui.row().classes("w-full gap-4"):
+                multi_type_sel = ui.select(PLOT_TYPES, label="Plot Type", value="Bar Chart").classes("w-48")
+                multi_x_sel = ui.select(
+                    grouping_cols + numeric_cols, label="X / Grouping",
+                    value=grouping_cols[0] if grouping_cols else (numeric_cols[0] if numeric_cols else None),
+                ).classes("w-48")
+                multi_color_sel = ui.select(
+                    ["(None)"] + grouping_cols, label="Color / Group",
+                    value="(None)",
+                ).classes("w-48")
+                multi_agg_sel = ui.select(["mean", "median", "sum", "count"],
+                                           label="Aggregation", value="mean").classes("w-40")
+
+            with ui.row().classes("w-full gap-4"):
+                default_multi_y = phenotype_cols[:6] if phenotype_cols else numeric_cols[:6]
+                multi_y_sel = ui.select(numeric_cols, multiple=True, label="Y Metrics (one plot each)",
+                                         value=default_multi_y).classes("flex-1")
+                multi_grid_sel = ui.select([1, 2, 3, 4], label="Grid columns", value=2).classes("w-32")
+
+            def gen_multi_plots():
+                if not multi_y_sel.value:
+                    ui.notify("Select at least one Y metric", type="warning")
+                    return
+                color = multi_color_sel.value if multi_color_sel.value != "(None)" else None
+                figs = []
+                for y_col in multi_y_sel.value:
+                    title = f"{multi_type_sel.value}: {y_col}"
+                    # Use generate_plot logic inline
+                    plot_df = filtered_df.copy()
+                    if multi_type_sel.value in ("Bar Chart", "Stacked Bar Chart") and y_col and multi_x_sel.value:
+                        gcols = [multi_x_sel.value]
+                        if color:
+                            gcols.append(color)
+                        plot_df = plot_df.groupby(gcols, as_index=False)[y_col].agg(multi_agg_sel.value)
+                    fig = None
+                    try:
+                        if multi_type_sel.value == "Bar Chart":
+                            fig = create_bar_chart(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                        elif multi_type_sel.value == "Box Plot":
+                            fig = create_box_plot(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                        elif multi_type_sel.value == "Violin Plot":
+                            fig = create_violin_plot(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                        elif multi_type_sel.value == "Strip Plot":
+                            fig = create_strip_plot(plot_df, multi_x_sel.value or "index", y_col, color=color, title=title)
+                        elif multi_type_sel.value == "Histogram":
+                            fig = create_histogram(plot_df, y_col, color=color, title=title)
+                        elif multi_type_sel.value == "Scatter Plot":
+                            fig = create_scatter_plot(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                        else:
+                            fig = create_bar_chart(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                    except Exception:
+                        pass
+                    if fig:
+                        figs.append({"title": title, "fig": fig})
+                        state.report_figures.append({"title": title, "fig": fig})
+
+                # Display grid
+                grid_c = int(multi_grid_sel.value)
+                multi_plot_container.clear()
+                with multi_plot_container:
+                    for row_start in range(0, len(figs), grid_c):
+                        row_items = figs[row_start:row_start + grid_c]
+                        with ui.row().classes("w-full gap-2"):
+                            for item in row_items:
+                                with ui.column().classes("flex-1 min-w-0"):
+                                    ui.plotly(item["fig"]).classes("w-full")
+
+                ui.notify(
+                    f"Generated {len(figs)} plots, all added to Report ({len(state.report_figures)} total)",
+                    type="positive",
+                )
+
+            ui.button("Generate All Plots", on_click=gen_multi_plots, color="primary").classes("mt-2")
+
         # ── Report ───────────────────────────────────────────────────
         with ui.tab_panel(report_tab):
-            ui.label(f"Report contains {len(state.report_figures)} figure(s)").classes("text-lg")
-            ui.label("Add figures via 'Add to Report' in Plot Builder.").classes("text-sm text-gray-500")
+            n_figs = len(state.report_figures)
+            ui.label("Report").classes("text-lg font-bold")
 
-            report_title_input = ui.input("Report Title", value="Homer Data Report").classes("w-96 mt-4")
+            with ui.row().classes("w-full gap-4"):
+                report_title_input = ui.input("Report Title", value="Homer Data Report").classes("flex-1")
+                report_grid_sel = ui.select([1, 2, 3, 4], label="PPTX Grid Cols", value=2).classes("w-40")
+                report_table_cb = ui.checkbox("Include data table", value=True)
 
-            with ui.row().classes("gap-4 mt-4"):
-                ui.button("Generate PDF Report",
+            ui.label(
+                f"Report contains {n_figs} figure(s). "
+                "Add via Plot Builder, Multi Plot, or Auto-Generate below."
+            ).classes("text-sm text-gray-500 mt-2")
+
+            # Auto-generate section
+            ui.separator()
+            ui.label("Auto-Generate Report").classes("text-md font-bold mt-2")
+            ui.label("Automatically create plots for all metrics and export.").classes("text-sm text-gray-500")
+
+            with ui.row().classes("w-full gap-4"):
+                auto_color_sel = ui.select(
+                    ["(None)"] + grouping_cols, label="Color / Group",
+                    value="(None)",
+                ).classes("w-48")
+                auto_types_sel = ui.select(
+                    ["Bar Chart", "Box Plot", "Violin Plot", "Strip Plot", "Histogram"],
+                    multiple=True, label="Plot types",
+                    value=["Bar Chart", "Box Plot"],
+                ).classes("flex-1")
+
+            def auto_generate():
+                color = auto_color_sel.value if auto_color_sel.value != "(None)" else None
+                x_col = None
+                for candidate in ["Treatment Group", "Genotype", "Analysis Region", "Sample ID"]:
+                    if candidate in grouping_cols:
+                        x_col = candidate
+                        break
+                if not x_col and grouping_cols:
+                    x_col = grouping_cols[0]
+
+                targets = phenotype_cols if phenotype_cols else numeric_cols[:12]
+                new_figs = []
+                for pt in auto_types_sel.value:
+                    for y_col in targets:
+                        title = f"{pt}: {y_col}"
+                        plot_df = filtered_df.copy()
+                        fig = None
+                        try:
+                            if pt in ("Bar Chart",) and x_col:
+                                gcols = [x_col]
+                                if color:
+                                    gcols.append(color)
+                                agg_df = plot_df.groupby(gcols, as_index=False)[y_col].agg("mean")
+                                fig = create_bar_chart(agg_df, x_col, y_col, color=color, title=title)
+                            elif pt == "Box Plot" and x_col:
+                                fig = create_box_plot(plot_df, x_col, y_col, color=color, title=title)
+                            elif pt == "Violin Plot" and x_col:
+                                fig = create_violin_plot(plot_df, x_col, y_col, color=color, title=title)
+                            elif pt == "Strip Plot" and x_col:
+                                fig = create_strip_plot(plot_df, x_col, y_col, color=color, title=title)
+                            elif pt == "Histogram":
+                                fig = create_histogram(plot_df, y_col, color=color, title=title)
+                        except Exception:
+                            pass
+                        if fig:
+                            new_figs.append({"title": title, "fig": fig})
+
+                state.report_figures.extend(new_figs)
+                ui.notify(
+                    f"Generated {len(new_figs)} plots. Report now has {len(state.report_figures)} figures.",
+                    type="positive",
+                )
+                main_content.refresh()
+
+            ui.button("Auto-Generate All Plots", on_click=auto_generate, color="primary").classes("mt-2")
+
+            # Export buttons
+            ui.separator()
+            ui.label("Export").classes("text-md font-bold mt-2")
+            with ui.row().classes("gap-4 mt-2"):
+                def download_pptx():
+                    if not state.report_figures:
+                        ui.notify("No figures in report", type="warning")
+                        return
+                    try:
+                        builder = ReportBuilder(
+                            title=report_title_input.value,
+                            dataset_name=ds.filename,
+                        )
+                        for entry in state.report_figures:
+                            builder.add_figure(entry["title"], entry["fig"])
+                        pptx_bytes = builder.generate_pptx(
+                            grid_cols=int(report_grid_sel.value),
+                            include_data_table=report_table_cb.value,
+                            df=filtered_df,
+                        )
+                        b64 = base64.b64encode(pptx_bytes).decode()
+                        ui.download(
+                            src=f"data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,{b64}",
+                            filename="homer_report.pptx",
+                        )
+                        ui.notify("PPTX downloaded!", type="positive")
+                    except Exception as ex:
+                        ui.notify(f"PPTX failed: {ex}", type="negative")
+
+                ui.button("Generate PPTX", on_click=download_pptx, color="primary")
+                ui.button("Generate PDF",
                           on_click=lambda: download_report(report_title_input.value),
-                          color="primary").props("" if state.report_figures else "disable")
+                          color="secondary")
+                ui.button("Download Data CSV", on_click=download_filtered_csv, color="secondary")
 
                 def clear_report():
                     state.report_figures.clear()
                     ui.notify("Report cleared", type="info")
                     main_content.refresh()
 
-                ui.button("Clear Report", on_click=clear_report, color="secondary")
+                ui.button("Clear All Figures", on_click=clear_report, color="secondary")
 
             if state.report_figures:
-                ui.separator()
-                ui.label("Figures in report:").classes("font-bold mt-2")
-                for i, entry in enumerate(state.report_figures):
-                    ui.label(f"  {i+1}. {entry['title']}").classes("text-sm")
+                with ui.expansion(f"Figures in report ({n_figs})", icon="list").classes("w-full mt-2"):
+                    for i, entry in enumerate(state.report_figures):
+                        ui.label(f"  {i+1}. {entry['title']}").classes("text-sm")
 
 
 # ── Main Page ────────────────────────────────────────────────────────────────
@@ -628,16 +1267,17 @@ Bar, Stacked Bar, Scatter, Box, Violin, Strip, Swarm, Histogram, XY Line, Heatma
 def index():
     ui.html(HOMER_CSS)
 
-    with ui.header().classes("bg-transparent shadow-none p-0"):
-        ui.html("""
-        <div class="homer-header">
-            <h1>HOMER</h1>
-            <p>Halo Output Mapper &amp; Explorer for Research</p>
-        </div>
-        """)
+    with ui.header().classes("shadow-none p-0 m-0").style("background: #0f172a; min-height: 0;"):
+        ui.html(
+            '<div class="homer-header">'
+            '<h1>HOMER</h1>'
+            '<p>Histology Output Mapper &amp; Explorer for Research</p>'
+            '<span class="version-tag">v1.0</span>'
+            '</div>'
+        )
 
-    with ui.left_drawer(value=True).classes("bg-gray-50 p-4"):
-        ui.label("Data Upload").classes("text-lg font-bold mb-2")
+    with ui.left_drawer(value=False).classes("p-4").style("background: #0f172a;"):
+        ui.html('<div class="sidebar-section-title">Data Upload</div>')
 
         force_type_select = ui.select(
             ["Auto-detect", "Force Object", "Force Summary", "Force Cluster"],
@@ -647,26 +1287,43 @@ def index():
         max_job_cb = ui.checkbox("Latest Job Id only", value=False)
 
         ui.upload(
-            label="Upload HALO data file",
+            label="Upload histology data file",
             auto_upload=True,
             on_upload=lambda e: handle_upload(e, force_type_select, max_job_cb),
         ).classes("w-full").props('accept=".csv,.tsv,.txt,.xlsx,.xls"')
 
         ui.separator()
-        ui.label("Demo Data").classes("text-sm font-bold")
+        ui.html('<div class="sidebar-section-title">Quick Start &mdash; Demo Data</div>')
+
+        with ui.expansion("Simulation Settings", icon="tune").classes("w-full"):
+            demo_n_samples = ui.number("Samples / images", value=8, min=2, max=100, step=1).classes("w-full")
+            demo_n_objects = ui.number("Objects / cells", value=5000, min=100, max=100000, step=500).classes("w-full")
+            demo_auto_agg = ui.checkbox("Auto-aggregate object data", value=True).tooltip(
+                "Automatically aggregate per-cell object data into per-image percentages for immediate plotting by Treatment, Genotype, etc.")
+
         with ui.row().classes("w-full gap-2"):
-            ui.button("Object", on_click=lambda: load_demo("object"), color="primary").props("dense").classes("flex-1")
-            ui.button("Summary", on_click=lambda: load_demo("summary"), color="primary").props("dense").classes("flex-1")
-            ui.button("Cluster", on_click=lambda: load_demo("cluster"), color="primary").props("dense").classes("flex-1")
+            ui.button("Object", on_click=lambda: load_demo("object", int(demo_n_samples.value), int(demo_n_objects.value), demo_auto_agg.value), color="primary").props("dense").classes("flex-1")
+            ui.button("Summary", on_click=lambda: load_demo("summary", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
+            ui.button("Cluster", on_click=lambda: load_demo("cluster", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
 
         ui.separator()
         sidebar_info()
 
-    with ui.column().classes("w-full p-4"):
+    with ui.column().classes("w-full p-4").style("background: #0f172a; min-height: 100vh;"):
         main_content()
 
-    with ui.footer().classes("bg-blue-800 text-white text-center p-2"):
-        ui.label("Homer v1.0 | HALO Data Dashboard | Built with NiceGUI").classes("text-sm")
+    with ui.footer().classes("text-center p-2").style(
+        "background: linear-gradient(180deg, transparent, #0f172a); "
+        "border-top: 1px solid rgba(99, 179, 237, 0.08);"
+    ):
+        ui.label("Homer v1.0  ·  Histology Data Dashboard  ·  Built with NiceGUI").classes("text-xs").style("color: #475569;")
 
 
-ui.run(title="Homer - Halo Data Dashboard", port=8080, reload=False)
+ui.run(
+    title="Homer - Histology Data Dashboard",
+    port=int(os.environ.get("PORT", 8080)),
+    host=os.environ.get("HOST", "0.0.0.0"),
+    reload=os.environ.get("HOMER_DEV", "").lower() in ("1", "true"),
+    storage_secret=os.environ.get("STORAGE_SECRET", "homer-halo-dashboard"),
+    dark=True,
+)
