@@ -187,10 +187,11 @@ def create_violin_plot(
     title: str = "",
     x_label: str = "",
     y_label: str = "",
+    points: str = "outliers",
 ) -> go.Figure:
     """Create an interactive violin plot."""
     fig = px.violin(
-        df, x=x, y=y, color=color, box=True, points="outliers",
+        df, x=x, y=y, color=color, box=True, points=points,
         title=title,
         color_discrete_sequence=HOMER_COLORS,
         template=HOMER_TEMPLATE,

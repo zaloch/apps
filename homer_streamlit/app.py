@@ -730,7 +730,7 @@ def _build_single_plot(dataset, filtered_df, plot_type, x_col, y_col, color_col,
         fig = create_box_plot(plot_df, x_col, y_col, color=color_col,
                               title=title, points=points)
     elif plot_type == "Violin Plot":
-        fig = create_violin_plot(plot_df, x_col, y_col, color=color_col, title=title)
+        fig = create_violin_plot(plot_df, x_col, y_col, color=color_col, title=title, points=points)
     elif plot_type == "Strip Plot":
         fig = create_strip_plot(plot_df, x_col or "index", y_col, color=color_col, title=title)
     elif plot_type == "Swarm Plot":
@@ -780,6 +780,11 @@ def render_multi_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFra
         )
         multi_grid_cols = st.slider("Grid columns", 1, 4, 2, key="multi_grid_cols")
         multi_agg = st.selectbox("Aggregation", ["mean", "median", "sum", "count"], key="multi_agg")
+        multi_points = st.selectbox("Show Points", ["outliers", "suspectedoutliers", "all", "False"],
+                                    key="multi_points",
+                                    help="Show individual data points on Box/Violin plots")
+        if multi_points == "False":
+            multi_points = False
 
     if st.button("Generate All Plots", type="primary", key="multi_gen"):
         if not multi_y_cols:
@@ -792,7 +797,7 @@ def render_multi_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFra
                 fig = _build_single_plot(
                     dataset, filtered_df, multi_plot_type,
                     x_col=multi_x, y_col=y_col, color_col=multi_color,
-                    title=title, agg_func=multi_agg,
+                    title=title, agg_func=multi_agg, points=multi_points,
                 )
                 if fig:
                     figs.append({"title": title, "fig": fig})

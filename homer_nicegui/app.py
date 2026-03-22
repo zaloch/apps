@@ -435,7 +435,7 @@ def generate_plot(
             fig = create_box_plot(plot_df, x, y_col, color=color, title=title, points=points)
         elif plot_type == "Violin Plot":
             x = x_col if x_col and x_col != "(None)" else None
-            fig = create_violin_plot(plot_df, x, y_col, color=color, title=title)
+            fig = create_violin_plot(plot_df, x, y_col, color=color, title=title, points=points)
         elif plot_type == "Strip Plot":
             x = x_col if x_col and x_col != "(None)" else "index"
             fig = create_strip_plot(plot_df, x, y_col, color=color, title=title)
@@ -1074,6 +1074,10 @@ def main_content():
                 ).classes("w-48")
                 multi_agg_sel = ui.select(["mean", "median", "sum", "count"],
                                            label="Aggregation", value="mean").classes("w-40")
+                multi_points_sel = ui.select(
+                    ["outliers", "suspectedoutliers", "all", "False"],
+                    label="Show Points", value="outliers",
+                ).classes("w-44").tooltip("Show individual data points on Box/Violin plots")
 
             with ui.row().classes("w-full gap-4"):
                 default_multi_y = phenotype_cols[:6] if phenotype_cols else numeric_cols[:6]
@@ -1086,6 +1090,7 @@ def main_content():
                     ui.notify("Select at least one Y metric", type="warning")
                     return
                 color = multi_color_sel.value if multi_color_sel.value != "(None)" else None
+                points_val = multi_points_sel.value if multi_points_sel.value != "False" else False
                 figs = []
                 for y_col in multi_y_sel.value:
                     title = f"{multi_type_sel.value}: {y_col}"
@@ -1101,9 +1106,9 @@ def main_content():
                         if multi_type_sel.value == "Bar Chart":
                             fig = create_bar_chart(plot_df, multi_x_sel.value, y_col, color=color, title=title)
                         elif multi_type_sel.value == "Box Plot":
-                            fig = create_box_plot(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                            fig = create_box_plot(plot_df, multi_x_sel.value, y_col, color=color, title=title, points=points_val)
                         elif multi_type_sel.value == "Violin Plot":
-                            fig = create_violin_plot(plot_df, multi_x_sel.value, y_col, color=color, title=title)
+                            fig = create_violin_plot(plot_df, multi_x_sel.value, y_col, color=color, title=title, points=points_val)
                         elif multi_type_sel.value == "Strip Plot":
                             fig = create_strip_plot(plot_df, multi_x_sel.value or "index", y_col, color=color, title=title)
                         elif multi_type_sel.value == "Histogram":
