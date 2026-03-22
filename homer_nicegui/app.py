@@ -291,18 +291,18 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
         ui.notify(f"Error loading file: {ex}", type="negative")
 
 
-def load_demo(demo_type: str):
+def load_demo(demo_type: str, n_samples: int = 8, n_objects: int = 5000):
     if demo_type == "object":
-        df = generate_object_data(n_cells=5000, n_images=3)
+        df = generate_object_data(n_cells=n_objects, n_images=n_samples)
         state.dataset = parse_halo_data(df, "demo_object_data.csv", force_type="object")
     elif demo_type == "summary":
-        df = generate_summary_data(n_images=12)
+        df = generate_summary_data(n_images=n_samples)
         state.dataset = parse_halo_data(df, "demo_summary_data.csv")
     elif demo_type == "cluster":
-        df = generate_cluster_data(n_clusters=200, n_images=4)
+        df = generate_cluster_data(n_clusters=n_objects, n_images=n_samples)
         state.dataset = parse_halo_data(df, "demo_cluster_data.csv", force_type="cluster")
     state.filters = {}
-    ui.notify(f"Loaded {demo_type} demo data", type="positive")
+    ui.notify(f"Loaded {demo_type} demo data ({n_samples} samples)", type="positive")
     main_content.refresh()
     sidebar_info.refresh()
 
@@ -1097,10 +1097,15 @@ def index():
 
         ui.separator()
         ui.html('<div class="sidebar-section-title">Quick Start &mdash; Demo Data</div>')
+
+        with ui.expansion("Simulation Settings", icon="tune").classes("w-full"):
+            demo_n_samples = ui.number("Samples / images", value=8, min=2, max=100, step=1).classes("w-full")
+            demo_n_objects = ui.number("Objects / cells", value=5000, min=100, max=100000, step=500).classes("w-full")
+
         with ui.row().classes("w-full gap-2"):
-            ui.button("Object", on_click=lambda: load_demo("object"), color="primary").props("dense").classes("flex-1")
-            ui.button("Summary", on_click=lambda: load_demo("summary"), color="primary").props("dense").classes("flex-1")
-            ui.button("Cluster", on_click=lambda: load_demo("cluster"), color="primary").props("dense").classes("flex-1")
+            ui.button("Object", on_click=lambda: load_demo("object", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
+            ui.button("Summary", on_click=lambda: load_demo("summary", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
+            ui.button("Cluster", on_click=lambda: load_demo("cluster", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
 
         ui.separator()
         sidebar_info()

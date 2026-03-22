@@ -360,25 +360,30 @@ def render_sidebar():
     # Demo data
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-section-title">Quick Start &mdash; Demo Data</div>', unsafe_allow_html=True)
+
+    with st.sidebar.expander("Simulation Settings"):
+        demo_n_samples = st.number_input("Number of samples / images", min_value=2, max_value=100, value=8, step=1, key="demo_n_samples")
+        demo_n_objects = st.number_input("Number of objects / cells", min_value=100, max_value=100000, value=5000, step=500, key="demo_n_objects")
+
     dc1, dc2, dc3 = st.sidebar.columns(3)
     load_demo_object = dc1.button("Object", use_container_width=True)
     load_demo_summary = dc2.button("Summary", use_container_width=True)
     load_demo_cluster = dc3.button("Cluster", use_container_width=True)
 
     if load_demo_object:
-        df = generate_object_data(n_cells=5000, n_images=3)
+        df = generate_object_data(n_cells=demo_n_objects, n_images=demo_n_samples)
         st.session_state.dataset = parse_halo_data(df, "demo_object_data.csv", force_type="object")
         st.session_state.filters = {}
         st.rerun()
 
     if load_demo_summary:
-        df = generate_summary_data(n_images=12)
+        df = generate_summary_data(n_images=demo_n_samples)
         st.session_state.dataset = parse_halo_data(df, "demo_summary_data.csv")
         st.session_state.filters = {}
         st.rerun()
 
     if load_demo_cluster:
-        df = generate_cluster_data(n_clusters=200, n_images=4)
+        df = generate_cluster_data(n_clusters=demo_n_objects, n_images=demo_n_samples)
         st.session_state.dataset = parse_halo_data(df, "demo_cluster_data.csv", force_type="cluster")
         st.session_state.filters = {}
         st.rerun()
