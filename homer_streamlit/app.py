@@ -45,7 +45,7 @@ st.set_page_config(
     page_title="Homer - Histology Data Dashboard",
     page_icon="🔬",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 CUSTOM_CSS = """
@@ -56,52 +56,46 @@ html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
 }
 
-/* ── Header ─────────────────────────────────────────────────────────────── */
-.homer-header {
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
-    border: 1px solid rgba(99, 179, 237, 0.15);
-    padding: 1.8rem 2.5rem;
-    border-radius: 16px;
-    margin-bottom: 1.5rem;
-    color: #E0E0E0;
-    position: relative;
-    overflow: hidden;
+/* ── Kill Streamlit top padding ──────────────────────────────────────── */
+.stApp > header { display: none; }
+section.main > div.block-container {
+    padding-top: 0.5rem !important;
+    max-width: 100% !important;
 }
-.homer-header::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, #4FC3F7, #7C4DFF, #4FC3F7);
-    border-radius: 16px 16px 0 0;
+
+/* ── Header (minimal bar) ────────────────────────────────────────────── */
+.homer-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.2rem 0;
+    margin-bottom: 0.3rem;
+    border-bottom: 1px solid rgba(99, 179, 237, 0.08);
 }
 .homer-header h1 {
     margin: 0;
-    font-size: 2rem;
+    font-size: 0.9rem;
     font-weight: 800;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
     background: linear-gradient(135deg, #4FC3F7, #81D4FA);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 .homer-header p {
-    margin: 0.25rem 0 0 0;
-    font-size: 0.9rem;
-    color: #94a3b8;
+    margin: 0;
+    font-size: 0.6rem;
+    color: #64748b;
     font-weight: 400;
-    letter-spacing: 0.02em;
 }
 .homer-header .version-tag {
-    position: absolute;
-    top: 1.2rem;
-    right: 2rem;
-    background: rgba(99, 179, 237, 0.1);
+    background: rgba(99, 179, 237, 0.08);
     color: #4FC3F7;
-    padding: 0.2rem 0.7rem;
-    border-radius: 20px;
-    font-size: 0.7rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 6px;
+    font-size: 0.5rem;
     font-weight: 600;
-    border: 1px solid rgba(99, 179, 237, 0.2);
+    border: 1px solid rgba(99, 179, 237, 0.1);
+    margin-left: auto;
 }
 
 /* ── Data Badges ────────────────────────────────────────────────────────── */
@@ -266,18 +260,12 @@ html, body, [class*="css"] {
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 .footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    background: linear-gradient(180deg, transparent, #0f172a);
-    border-top: 1px solid rgba(99, 179, 237, 0.08);
     text-align: center;
-    padding: 0.5rem 0;
-    z-index: 1000;
+    padding: 0.3rem 0;
     color: #475569;
-    font-size: 0.75rem;
+    font-size: 0.65rem;
     letter-spacing: 0.02em;
+    margin-top: 2rem;
 }
 
 /* ── Streamlit Overrides ────────────────────────────────────────────────── */
@@ -313,18 +301,21 @@ if "metadata" not in st.session_state:
     st.session_state.metadata = None  # ExperimentMetadata or None
 if "aggregated_df" not in st.session_state:
     st.session_state.aggregated_df = None  # per-image aggregated data
+if "multi_plots" not in st.session_state:
+    st.session_state.multi_plots = []  # list of {"title", "fig"} for multi-plot builder
 
 
 # ── Header / Footer ─────────────────────────────────────────────────────────
 
 def display_header():
-    st.markdown("""
-    <div class="homer-header">
-        <h1>HOMER</h1>
-        <p>Histology Output Mapper &amp; Explorer for Research</p>
-        <span class="version-tag">v1.0</span>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="homer-header">'
+        '<h1>HOMER</h1>'
+        '<p>Histology Output Mapper &amp; Explorer for Research</p>'
+        '<span class="version-tag">v1.0</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def display_footer():
@@ -364,6 +355,8 @@ def render_sidebar():
     with st.sidebar.expander("Simulation Settings"):
         demo_n_samples = st.number_input("Number of samples / images", min_value=2, max_value=100, value=8, step=1, key="demo_n_samples")
         demo_n_objects = st.number_input("Number of objects / cells", min_value=100, max_value=100000, value=5000, step=500, key="demo_n_objects")
+        demo_auto_agg = st.checkbox("Auto-aggregate object data", value=True, key="demo_auto_agg",
+                                    help="Automatically aggregate per-cell object data into per-image percentages for immediate plotting by Treatment, Genotype, etc.")
 
     dc1, dc2, dc3 = st.sidebar.columns(3)
     load_demo_object = dc1.button("Object", use_container_width=True)
@@ -372,8 +365,38 @@ def render_sidebar():
 
     if load_demo_object:
         df = generate_object_data(n_cells=demo_n_objects, n_images=demo_n_samples)
-        st.session_state.dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
+        dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
+        st.session_state.dataset = dataset
         st.session_state.filters = {}
+
+        if demo_auto_agg:
+            # Build grouping columns: Sample ID + Analysis Region + all metadata factors
+            group_cols = []
+            for col in ["Sample ID", "Analysis Region"]:
+                if col in df.columns:
+                    group_cols.append(col)
+            meta_factors = ["Treatment Group", "Genotype", "Timepoint",
+                            "Subject ID", "Sex", "Age", "Dose", "Cohort"]
+            for col in meta_factors:
+                if col in df.columns and col not in group_cols:
+                    group_cols.append(col)
+
+            agg_df = aggregate_object_data(
+                df,
+                group_cols=group_cols,
+                classification_cols=dataset.classification_columns,
+                phenotype_combo_cols=dataset.phenotype_combo_columns,
+                intensity_cols=(dataset.nucleus_intensity_columns +
+                                dataset.cell_intensity_columns),
+                morphology_cols=dataset.morphology_columns,
+            )
+            st.session_state.aggregated_df = agg_df
+            # Switch directly to aggregated view for plotting
+            st.session_state.dataset = parse_histology_data(
+                agg_df, "demo_object_data_aggregated.csv",
+                force_type="summary",
+            )
+
         st.rerun()
 
     if load_demo_summary:
@@ -523,54 +546,65 @@ PLOT_TYPES = [
 
 
 def render_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFrame):
-    st.markdown('<div class="section-header"><span class="icon">📊</span><h3>Plot Builder</h3></div>', unsafe_allow_html=True)
+    # ── Plot display area (full width, top) ──
+    plot_container = st.container()
 
-    col_config, col_preview = st.columns([1, 2])
-
-    with col_config:
-        plot_type = st.selectbox("Plot Type", PLOT_TYPES)
-
+    # ── Collapsible config panel below ──
+    with st.expander("Plot Configuration", expanded=True):
         numeric_cols = get_plottable_numeric_columns(dataset)
         grouping_cols = get_grouping_columns(dataset)
         phenotype_cols = get_phenotype_columns(dataset)
 
-        # Axis selection based on plot type
-        x_col = y_col = None
+        # Row 1: type + axes (compact horizontal layout)
+        c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
 
-        if plot_type == "Histogram":
-            x_col = st.selectbox("Variable", numeric_cols, key="x_col")
-        elif plot_type in ("Box Plot", "Violin Plot", "Strip Plot", "Swarm Plot"):
-            x_col = st.selectbox("Grouping (X)", ["(None)"] + grouping_cols, key="x_col")
-            if x_col == "(None)":
-                x_col = None
-            y_col = st.selectbox("Value (Y)", numeric_cols, key="y_col")
-        elif plot_type == "Pairplot Matrix":
-            default_cols = phenotype_cols[:5] if phenotype_cols else numeric_cols[:5]
-            pair_cols = st.multiselect("Columns for pairplot", numeric_cols, default=default_cols, key="pair_cols")
-        elif plot_type == "Sample Overview":
-            sample_col = st.selectbox("Sample Column", grouping_cols,
-                                       index=grouping_cols.index("Sample ID") if "Sample ID" in grouping_cols else 0,
-                                       key="sample_col")
-            overview_metrics = st.multiselect("Metrics", numeric_cols,
-                                              default=phenotype_cols[:4] if phenotype_cols else numeric_cols[:4],
-                                              key="overview_metrics")
-        else:
-            if plot_type in ("Bar Chart", "Stacked Bar Chart"):
+        with c1:
+            plot_type = st.selectbox("Plot Type", PLOT_TYPES)
+
+        x_col = y_col = None
+        pair_cols = None
+        sample_col = None
+        overview_metrics = None
+
+        with c2:
+            if plot_type == "Histogram":
+                x_col = st.selectbox("Variable", numeric_cols, key="x_col")
+            elif plot_type in ("Box Plot", "Violin Plot", "Strip Plot", "Swarm Plot"):
+                x_col = st.selectbox("Grouping (X)", ["(None)"] + grouping_cols, key="x_col")
+                if x_col == "(None)":
+                    x_col = None
+            elif plot_type == "Pairplot Matrix":
+                default_cols = phenotype_cols[:5] if phenotype_cols else numeric_cols[:5]
+                pair_cols = st.multiselect("Columns", numeric_cols, default=default_cols, key="pair_cols")
+            elif plot_type == "Sample Overview":
+                sample_col = st.selectbox("Sample Column", grouping_cols,
+                                           index=grouping_cols.index("Sample ID") if "Sample ID" in grouping_cols else 0,
+                                           key="sample_col")
+            elif plot_type in ("Bar Chart", "Stacked Bar Chart"):
                 x_col = st.selectbox("X Axis", grouping_cols + numeric_cols, key="x_col")
             else:
                 x_col = st.selectbox("X Axis", numeric_cols + grouping_cols, key="x_col")
-            y_col = st.selectbox("Y Axis", numeric_cols, key="y_col")
 
-        # Color/group
-        color_col = None
-        if plot_type not in ("Pairplot Matrix", "Sample Overview"):
-            color_col = st.selectbox("Color / Group By", ["(None)"] + grouping_cols, key="color_col")
-            if color_col == "(None)":
-                color_col = None
+        with c3:
+            if plot_type in ("Box Plot", "Violin Plot", "Strip Plot", "Swarm Plot"):
+                y_col = st.selectbox("Value (Y)", numeric_cols, key="y_col")
+            elif plot_type == "Sample Overview":
+                overview_metrics = st.multiselect("Metrics", numeric_cols,
+                                                  default=phenotype_cols[:4] if phenotype_cols else numeric_cols[:4],
+                                                  key="overview_metrics")
+            elif plot_type not in ("Histogram", "Pairplot Matrix"):
+                y_col = st.selectbox("Y Axis", numeric_cols, key="y_col")
 
-        title = st.text_input("Chart Title", value="", key="chart_title")
+        with c4:
+            color_col = None
+            if plot_type not in ("Pairplot Matrix", "Sample Overview"):
+                color_col = st.selectbox("Color / Group", ["(None)"] + grouping_cols, key="color_col")
+                if color_col == "(None)":
+                    color_col = None
 
-        # Plot-specific options
+        # Row 2: title + options + generate
+        o1, o2, o3 = st.columns([2, 2, 1])
+
         orientation = "v"
         barmode = "group"
         normalize = False
@@ -578,97 +612,56 @@ def render_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFrame):
         points = "outliers"
         nbins = 50
         agg_func = "mean"
+        title = ""
 
-        if plot_type == "Bar Chart":
-            orientation = "v" if st.radio("Orientation", ["Vertical", "Horizontal"], key="orient") == "Vertical" else "h"
-            barmode = st.radio("Bar Mode", ["group", "overlay"], key="barmode")
-            agg_func = st.selectbox("Aggregation", ["mean", "median", "sum", "count"], key="agg_func")
+        with o1:
+            title = st.text_input("Chart Title", value="", key="chart_title")
 
-        elif plot_type == "Stacked Bar Chart":
-            orientation = "v" if st.radio("Orientation", ["Vertical", "Horizontal"], key="orient") == "Vertical" else "h"
-            normalize = st.checkbox("Normalize to 100%", key="normalize")
-            agg_func = st.selectbox("Aggregation", ["mean", "median", "sum", "count"], key="agg_func")
+        with o2:
+            if plot_type == "Bar Chart":
+                oo1, oo2, oo3 = st.columns(3)
+                with oo1:
+                    orientation = "v" if st.radio("Orient", ["V", "H"], key="orient", horizontal=True) == "V" else "h"
+                with oo2:
+                    barmode = st.radio("Mode", ["group", "overlay"], key="barmode", horizontal=True)
+                with oo3:
+                    agg_func = st.selectbox("Agg", ["mean", "median", "sum", "count"], key="agg_func")
+            elif plot_type == "Stacked Bar Chart":
+                oo1, oo2, oo3 = st.columns(3)
+                with oo1:
+                    orientation = "v" if st.radio("Orient", ["V", "H"], key="orient", horizontal=True) == "V" else "h"
+                with oo2:
+                    normalize = st.checkbox("Normalize %", key="normalize")
+                with oo3:
+                    agg_func = st.selectbox("Agg", ["mean", "median", "sum", "count"], key="agg_func")
+            elif plot_type == "Scatter Plot":
+                trend = st.selectbox("Trendline", ["None", "OLS", "LOWESS"], key="trend")
+                trendline = None if trend == "None" else trend.lower()
+            elif plot_type in ("Box Plot", "Violin Plot"):
+                points = st.selectbox("Points", ["outliers", "all", "suspectedoutliers", False], key="points")
+            elif plot_type == "Histogram":
+                nbins = st.slider("Bins", 10, 200, 50, key="nbins")
 
-        elif plot_type == "Scatter Plot":
-            trend = st.selectbox("Trendline", ["None", "OLS", "LOWESS"], key="trend")
-            trendline = None if trend == "None" else trend.lower()
+        with o3:
+            st.write("")  # vertical align
+            generate_btn = st.button("Generate Plot", type="primary", use_container_width=True)
 
-        elif plot_type in ("Box Plot", "Violin Plot"):
-            points = st.selectbox("Show Points", ["outliers", "all", "suspectedoutliers", False], key="points")
-
-        elif plot_type == "Histogram":
-            nbins = st.slider("Number of Bins", 10, 200, 50, key="nbins")
-
-        generate_btn = st.button("Generate Plot", type="primary", use_container_width=True)
-
-    with col_preview:
+    # ── Render plot in full-width container ──
+    with plot_container:
         if generate_btn:
             st.session_state.plot_counter += 1
-
             try:
-                plot_df = filtered_df.copy()
-
-                # Downsample for plotting if dataset is large
-                if len(plot_df) > 50_000 and plot_type in (
-                    "Scatter Plot", "Strip Plot", "Swarm Plot", "Pairplot Matrix",
-                ):
-                    plot_df = sample_for_plotting(plot_df, max_points=50_000,
-                                                   stratify_col=color_col)
-                    st.caption(f"Showing {len(plot_df):,} sampled points for performance.")
-                fig = None
-
-                # Aggregate for bar charts
-                if plot_type in ("Bar Chart", "Stacked Bar Chart") and y_col and x_col:
-                    group_cols = [x_col]
-                    if color_col:
-                        group_cols.append(color_col)
-                    plot_df = plot_df.groupby(group_cols, as_index=False)[y_col].agg(agg_func)
-
-                if plot_type == "Bar Chart":
-                    fig = create_bar_chart(plot_df, x_col, y_col, color=color_col,
-                                           orientation=orientation, barmode=barmode, title=title)
-                elif plot_type == "Stacked Bar Chart":
-                    if not color_col:
-                        st.warning("Stacked bar charts require a Color/Group By column.")
-                    else:
-                        fig = create_stacked_bar_chart(plot_df, x_col, y_col, color=color_col,
-                                                       orientation=orientation, title=title, normalize=normalize)
-                elif plot_type == "Scatter Plot":
-                    fig = create_scatter_plot(plot_df, x_col, y_col, color=color_col,
-                                              title=title, trendline=trendline)
-                elif plot_type == "Box Plot":
-                    fig = create_box_plot(plot_df, x_col, y_col, color=color_col,
-                                          title=title, points=points)
-                elif plot_type == "Violin Plot":
-                    fig = create_violin_plot(plot_df, x_col, y_col, color=color_col, title=title)
-                elif plot_type == "Strip Plot":
-                    fig = create_strip_plot(plot_df, x_col or "index", y_col, color=color_col, title=title)
-                elif plot_type == "Swarm Plot":
-                    fig = create_swarm_plot(plot_df, x_col or "index", y_col, color=color_col, title=title)
-                elif plot_type == "Histogram":
-                    fig = create_histogram(plot_df, x_col, color=color_col, nbins=nbins, title=title)
-                elif plot_type == "XY Line Plot":
-                    fig = create_xy_line_plot(plot_df, x_col, y_col, color=color_col, title=title)
-                elif plot_type == "Heatmap":
-                    z_col = st.selectbox("Value (Z/Color)", numeric_cols, key="z_col")
-                    if y_col:
-                        fig = create_heatmap(plot_df, x_col, y_col, z_col, title=title)
-                elif plot_type == "Pairplot Matrix":
-                    if pair_cols and len(pair_cols) >= 2:
-                        fig = create_pairplot_matrix(plot_df, pair_cols, color=color_col, title=title)
-                    else:
-                        st.warning("Select at least 2 columns for pairplot.")
-                elif plot_type == "Sample Overview":
-                    if overview_metrics:
-                        fig = create_sample_overview_strip(plot_df, overview_metrics,
-                                                           sample_col=sample_col, title=title)
-                    else:
-                        st.warning("Select at least 1 metric.")
-
+                fig = _build_single_plot(
+                    dataset, filtered_df, plot_type,
+                    x_col=x_col, y_col=y_col, color_col=color_col,
+                    title=title, agg_func=agg_func, orientation=orientation,
+                    barmode=barmode, normalize=normalize, trendline=trendline,
+                    points=points, nbins=nbins, pair_cols=pair_cols,
+                    sample_col=sample_col, overview_metrics=overview_metrics,
+                )
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
                     _render_download_buttons(fig, title, plot_type, x_col, y_col)
-
             except Exception as e:
                 st.error(f"Error generating plot: {e}")
 
@@ -699,6 +692,133 @@ def _render_download_buttons(fig, title, plot_type, x_col, y_col):
             report_title = title if title else f"{plot_type}: {y_col or x_col}"
             st.session_state.report_figures.append({"title": report_title, "fig": fig})
             st.success(f"Added to report ({len(st.session_state.report_figures)} figures)")
+
+
+# ── Multi Plot Builder ──────────────────────────────────────────────────────
+
+def _build_single_plot(dataset, filtered_df, plot_type, x_col, y_col, color_col,
+                       title, agg_func="mean", orientation="v", barmode="group",
+                       normalize=False, trendline=None, points="outliers",
+                       nbins=50, pair_cols=None, sample_col=None,
+                       overview_metrics=None):
+    """Build and return a single plotly figure (shared by Plot Builder and Multi Plot Builder)."""
+    plot_df = filtered_df.copy()
+
+    if len(plot_df) > 50_000 and plot_type in (
+        "Scatter Plot", "Strip Plot", "Swarm Plot", "Pairplot Matrix",
+    ):
+        plot_df = sample_for_plotting(plot_df, max_points=50_000, stratify_col=color_col)
+
+    # Aggregate for bar charts
+    if plot_type in ("Bar Chart", "Stacked Bar Chart") and y_col and x_col:
+        group_cols = [x_col]
+        if color_col:
+            group_cols.append(color_col)
+        plot_df = plot_df.groupby(group_cols, as_index=False)[y_col].agg(agg_func)
+
+    fig = None
+    if plot_type == "Bar Chart":
+        fig = create_bar_chart(plot_df, x_col, y_col, color=color_col,
+                               orientation=orientation, barmode=barmode, title=title)
+    elif plot_type == "Stacked Bar Chart" and color_col:
+        fig = create_stacked_bar_chart(plot_df, x_col, y_col, color=color_col,
+                                       orientation=orientation, title=title, normalize=normalize)
+    elif plot_type == "Scatter Plot":
+        fig = create_scatter_plot(plot_df, x_col, y_col, color=color_col,
+                                  title=title, trendline=trendline)
+    elif plot_type == "Box Plot":
+        fig = create_box_plot(plot_df, x_col, y_col, color=color_col,
+                              title=title, points=points)
+    elif plot_type == "Violin Plot":
+        fig = create_violin_plot(plot_df, x_col, y_col, color=color_col, title=title)
+    elif plot_type == "Strip Plot":
+        fig = create_strip_plot(plot_df, x_col or "index", y_col, color=color_col, title=title)
+    elif plot_type == "Swarm Plot":
+        fig = create_swarm_plot(plot_df, x_col or "index", y_col, color=color_col, title=title)
+    elif plot_type == "Histogram":
+        fig = create_histogram(plot_df, x_col, color=color_col, nbins=nbins, title=title)
+    elif plot_type == "XY Line Plot":
+        fig = create_xy_line_plot(plot_df, x_col, y_col, color=color_col, title=title)
+    elif plot_type == "Heatmap" and y_col:
+        fig = create_heatmap(plot_df, x_col, y_col, y_col, title=title)
+    elif plot_type == "Pairplot Matrix" and pair_cols and len(pair_cols) >= 2:
+        fig = create_pairplot_matrix(plot_df, pair_cols, color=color_col, title=title)
+    elif plot_type == "Sample Overview" and overview_metrics:
+        fig = create_sample_overview_strip(plot_df, overview_metrics,
+                                           sample_col=sample_col, title=title)
+    return fig
+
+
+def render_multi_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFrame):
+    """Multi Plot Builder: generate a grid of plots at once."""
+    st.markdown('<div class="section-header"><span class="icon">📊</span><h3>Multi Plot Builder</h3></div>', unsafe_allow_html=True)
+    st.caption("Generate multiple plots at once. Each Y metric becomes a separate plot.")
+
+    numeric_cols = get_plottable_numeric_columns(dataset)
+    grouping_cols = get_grouping_columns(dataset)
+    phenotype_cols = get_phenotype_columns(dataset)
+
+    mc1, mc2 = st.columns([1, 1])
+    with mc1:
+        multi_plot_type = st.selectbox("Plot Type", PLOT_TYPES, key="multi_plot_type")
+        multi_x = st.selectbox("X Axis / Grouping",
+                               grouping_cols + numeric_cols if multi_plot_type in (
+                                   "Bar Chart", "Stacked Bar Chart", "Box Plot",
+                                   "Violin Plot", "Strip Plot", "Swarm Plot",
+                               ) else numeric_cols + grouping_cols,
+                               key="multi_x")
+        multi_color = st.selectbox("Color / Group By", ["(None)"] + grouping_cols, key="multi_color")
+        if multi_color == "(None)":
+            multi_color = None
+
+    with mc2:
+        default_y = phenotype_cols[:6] if phenotype_cols else numeric_cols[:6]
+        multi_y_cols = st.multiselect(
+            "Y Metrics (one plot each)", numeric_cols,
+            default=default_y,
+            key="multi_y_cols",
+        )
+        multi_grid_cols = st.slider("Grid columns", 1, 4, 2, key="multi_grid_cols")
+        multi_agg = st.selectbox("Aggregation", ["mean", "median", "sum", "count"], key="multi_agg")
+
+    if st.button("Generate All Plots", type="primary", key="multi_gen"):
+        if not multi_y_cols:
+            st.warning("Select at least one Y metric.")
+        else:
+            figs = []
+            progress = st.progress(0)
+            for i, y_col in enumerate(multi_y_cols):
+                title = f"{multi_plot_type}: {y_col}"
+                fig = _build_single_plot(
+                    dataset, filtered_df, multi_plot_type,
+                    x_col=multi_x, y_col=y_col, color_col=multi_color,
+                    title=title, agg_func=multi_agg,
+                )
+                if fig:
+                    figs.append({"title": title, "fig": fig})
+                progress.progress((i + 1) / len(multi_y_cols))
+            progress.empty()
+
+            st.session_state.multi_plots = figs
+            # Also add all to report
+            for item in figs:
+                st.session_state.report_figures.append(item)
+            st.success(f"Generated {len(figs)} plots. All added to Report ({len(st.session_state.report_figures)} total).")
+
+    # Display grid
+    plots = st.session_state.multi_plots
+    if plots:
+        cols_per_row = multi_grid_cols if "multi_grid_cols" in st.session_state else 2
+        for row_start in range(0, len(plots), cols_per_row):
+            row_items = plots[row_start:row_start + cols_per_row]
+            cols = st.columns(len(row_items))
+            for col, item in zip(cols, row_items):
+                with col:
+                    st.plotly_chart(item["fig"], use_container_width=True)
+
+        if st.button("Clear Multi Plots", key="clear_multi"):
+            st.session_state.multi_plots = []
+            st.rerun()
 
 
 # ── Data Processing Tab ─────────────────────────────────────────────────────
@@ -858,41 +978,149 @@ def render_summary_stats(dataset: HistologyDataset, filtered_df: pd.DataFrame):
 
 # ── Report Download ──────────────────────────────────────────────────────────
 
+def _auto_generate_all_plots(dataset: HistologyDataset, filtered_df: pd.DataFrame,
+                             plot_types: list[str], color_col: str | None,
+                             engine: str = "plotly") -> list[dict]:
+    """Auto-generate a comprehensive set of plots for all plottable metrics."""
+    numeric_cols = get_plottable_numeric_columns(dataset)
+    grouping_cols = get_grouping_columns(dataset)
+    phenotype_cols = get_phenotype_columns(dataset)
+    figs = []
+
+    # Pick a sensible x grouping
+    x_col = None
+    for candidate in ["Treatment Group", "Genotype", "Analysis Region", "Sample ID"]:
+        if candidate in grouping_cols:
+            x_col = candidate
+            break
+    if not x_col and grouping_cols:
+        x_col = grouping_cols[0]
+
+    for pt in plot_types:
+        targets = phenotype_cols if phenotype_cols else numeric_cols[:12]
+        for y_col in targets:
+            title = f"{pt}: {y_col}"
+            if pt in ("Bar Chart", "Box Plot", "Violin Plot", "Strip Plot") and x_col:
+                fig = _build_single_plot(dataset, filtered_df, pt,
+                                         x_col=x_col, y_col=y_col, color_col=color_col,
+                                         title=title)
+            elif pt == "Histogram":
+                fig = _build_single_plot(dataset, filtered_df, pt,
+                                         x_col=y_col, y_col=None, color_col=color_col,
+                                         title=title)
+            elif pt == "Scatter Plot" and len(numeric_cols) >= 2:
+                other = [c for c in numeric_cols if c != y_col]
+                if other:
+                    fig = _build_single_plot(dataset, filtered_df, pt,
+                                             x_col=other[0], y_col=y_col, color_col=color_col,
+                                             title=title)
+                else:
+                    fig = None
+            else:
+                fig = None
+            if fig:
+                figs.append({"title": title, "fig": fig})
+    return figs
+
+
 def render_report_section(dataset: HistologyDataset, filtered_df: pd.DataFrame):
-    st.markdown('<div class="section-header"><span class="icon">📄</span><h3>Report Generation</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header"><span class="icon">📄</span><h3>Report</h3></div>', unsafe_allow_html=True)
 
     n_figs = len(st.session_state.report_figures)
-    st.info(f"Report contains {n_figs} figure(s). Add figures via 'Add to Report' in Plot Builder.")
 
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
+    # ── Settings row ──
+    rc1, rc2, rc3, rc4 = st.columns([2, 1, 1, 1])
+    with rc1:
         report_title = st.text_input("Report Title", "Homer Data Report", key="report_title")
+    with rc2:
+        grid_cols = st.selectbox("Grid columns (PPTX)", [1, 2, 3, 4], index=1, key="report_grid_cols")
+    with rc3:
+        include_table = st.checkbox("Include data table", value=True, key="report_inc_table")
+    with rc4:
+        engine = st.selectbox("Render engine", ["plotly", "matplotlib"], key="report_engine")
 
-    with col2:
-        if st.button("Generate PDF Report", type="primary", disabled=(n_figs == 0)):
+    st.info(f"Report contains **{n_figs}** figure(s). Add via Plot Builder, Multi Plot Builder, or Auto-Generate below.")
+
+    # ── Auto-generate ──
+    st.markdown("#### Auto-Generate Report")
+    st.caption("Automatically create plots for all metrics and export.")
+
+    ac1, ac2, ac3 = st.columns(3)
+    with ac1:
+        grouping_cols = get_grouping_columns(dataset)
+        auto_color = st.selectbox("Color / Group By", ["(None)"] + grouping_cols, key="auto_color")
+        if auto_color == "(None)":
+            auto_color = None
+    with ac2:
+        auto_types = st.multiselect(
+            "Plot types to include",
+            ["Bar Chart", "Box Plot", "Violin Plot", "Strip Plot", "Histogram"],
+            default=["Bar Chart", "Box Plot"],
+            key="auto_types",
+        )
+    with ac3:
+        st.write("")  # spacer
+        st.write("")
+        if st.button("Auto-Generate All Plots", type="primary", key="auto_gen"):
+            with st.spinner("Generating plots for all metrics..."):
+                new_figs = _auto_generate_all_plots(dataset, filtered_df, auto_types, auto_color, engine)
+            st.session_state.report_figures.extend(new_figs)
+            st.success(f"Generated {len(new_figs)} plots. Report now has {len(st.session_state.report_figures)} figures.")
+            st.rerun()
+
+    # ── Export buttons ──
+    st.markdown("---")
+    st.markdown("#### Export")
+    ex1, ex2, ex3, ex4 = st.columns(4)
+
+    with ex1:
+        if st.button("Generate PPTX", type="primary", disabled=(n_figs == 0), key="gen_pptx"):
             try:
-                with st.spinner("Generating PDF report..."):
+                with st.spinner("Building PPTX..."):
+                    builder = ReportBuilder(title=report_title, dataset_name=dataset.filename)
+                    for entry in st.session_state.report_figures:
+                        builder.add_figure(entry["title"], entry["fig"])
+                    pptx_bytes = builder.generate_pptx(
+                        grid_cols=grid_cols,
+                        include_data_table=include_table,
+                        df=filtered_df,
+                    )
+                st.download_button("Download PPTX", data=pptx_bytes,
+                                   file_name="homer_report.pptx",
+                                   mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                   key="download_pptx")
+            except Exception as e:
+                st.error(f"PPTX generation failed: {e}")
+
+    with ex2:
+        if st.button("Generate PDF", disabled=(n_figs == 0), key="gen_pdf"):
+            try:
+                with st.spinner("Building PDF..."):
                     builder = ReportBuilder(title=report_title, dataset_name=dataset.filename)
                     for entry in st.session_state.report_figures:
                         builder.add_figure(entry["title"], entry["fig"])
                     pdf_bytes = builder.generate_pdf()
-
-                st.download_button("Download PDF Report", data=pdf_bytes,
+                st.download_button("Download PDF", data=pdf_bytes,
                                    file_name="homer_report.pdf", mime="application/pdf",
                                    key="download_pdf")
             except Exception as e:
-                st.error(f"Error generating report: {e}")
+                st.error(f"PDF generation failed: {e}")
 
-    with col3:
-        if st.button("Clear Report Figures"):
+    with ex3:
+        csv_data = filtered_df.to_csv(index=False).encode()
+        st.download_button("Download Data CSV", data=csv_data,
+                           file_name="homer_data.csv", mime="text/csv", key="dl_report_csv")
+
+    with ex4:
+        if st.button("Clear All Figures", key="clear_report"):
             st.session_state.report_figures = []
             st.rerun()
 
+    # ── Figures list ──
     if st.session_state.report_figures:
-        st.markdown("**Figures in report:**")
-        for i, entry in enumerate(st.session_state.report_figures):
-            st.write(f"{i+1}. {entry['title']}")
+        with st.expander(f"Figures in report ({n_figs})", expanded=False):
+            for i, entry in enumerate(st.session_state.report_figures):
+                st.write(f"{i+1}. {entry['title']}")
 
 
 # ── Metadata Tab ──────────────────────────────────────────────────────────────
@@ -1199,21 +1427,23 @@ def main():
 
     filtered_df = apply_filters(dataset.df, st.session_state.filters)
 
-    tab_plots, tab_metadata, tab_process, tab_table, tab_stats, tab_report = st.tabs([
-        "📊 Plot Builder", "🧬 Metadata", "🧹 Processing",
-        "📋 Data Table", "📈 Statistics", "📄 Report",
+    tab_table, tab_metadata, tab_process, tab_stats, tab_plots, tab_multi, tab_report = st.tabs([
+        "📋 Data Table", "🧬 Metadata", "🧹 Processing",
+        "📈 Statistics", "📊 Plot Builder", "📊 Multi Plot", "📄 Report",
     ])
 
-    with tab_plots:
-        render_plot_builder(dataset, filtered_df)
+    with tab_table:
+        render_data_table(filtered_df)
     with tab_metadata:
         render_metadata_tab(dataset, filtered_df)
     with tab_process:
         render_data_processing(dataset, filtered_df)
-    with tab_table:
-        render_data_table(filtered_df)
     with tab_stats:
         render_summary_stats(dataset, filtered_df)
+    with tab_plots:
+        render_plot_builder(dataset, filtered_df)
+    with tab_multi:
+        render_multi_plot_builder(dataset, filtered_df)
     with tab_report:
         render_report_section(dataset, filtered_df)
 
