@@ -359,9 +359,9 @@ def render_sidebar():
                                     help="Automatically aggregate per-cell object data into per-image percentages for immediate plotting by Treatment, Genotype, etc.")
 
     dc1, dc2, dc3 = st.sidebar.columns(3)
-    load_demo_object = dc1.button("Object", use_container_width=True)
-    load_demo_summary = dc2.button("Summary", use_container_width=True)
-    load_demo_cluster = dc3.button("Cluster", use_container_width=True)
+    load_demo_object = dc1.button("Object", width="stretch")
+    load_demo_summary = dc2.button("Summary", width="stretch")
+    load_demo_cluster = dc3.button("Cluster", width="stretch")
 
     if load_demo_object:
         df = generate_object_data(n_cells=demo_n_objects, n_images=demo_n_samples)
@@ -644,7 +644,7 @@ def render_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFrame):
 
         with o3:
             st.write("")  # vertical align
-            generate_btn = st.button("Generate Plot", type="primary", use_container_width=True)
+            generate_btn = st.button("Generate Plot", type="primary", width="stretch")
 
     # ── Render plot in full-width container ──
     with plot_container:
@@ -660,7 +660,7 @@ def render_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFrame):
                     sample_col=sample_col, overview_metrics=overview_metrics,
                 )
                 if fig:
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                     _render_download_buttons(fig, title, plot_type, x_col, y_col)
             except Exception as e:
                 st.error(f"Error generating plot: {e}")
@@ -730,7 +730,7 @@ def _build_single_plot(dataset, filtered_df, plot_type, x_col, y_col, color_col,
         fig = create_box_plot(plot_df, x_col, y_col, color=color_col,
                               title=title, points=points)
     elif plot_type == "Violin Plot":
-        fig = create_violin_plot(plot_df, x_col, y_col, color=color_col, title=title)
+        fig = create_violin_plot(plot_df, x_col, y_col, color=color_col, title=title, points=points)
     elif plot_type == "Strip Plot":
         fig = create_strip_plot(plot_df, x_col or "index", y_col, color=color_col, title=title)
     elif plot_type == "Swarm Plot":
@@ -780,6 +780,11 @@ def render_multi_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFra
         )
         multi_grid_cols = st.slider("Grid columns", 1, 4, 2, key="multi_grid_cols")
         multi_agg = st.selectbox("Aggregation", ["mean", "median", "sum", "count"], key="multi_agg")
+        multi_points = st.selectbox("Show Points", ["outliers", "suspectedoutliers", "all", "False"],
+                                    key="multi_points",
+                                    help="Show individual data points on Box/Violin plots")
+        if multi_points == "False":
+            multi_points = False
 
     if st.button("Generate All Plots", type="primary", key="multi_gen"):
         if not multi_y_cols:
@@ -792,7 +797,7 @@ def render_multi_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFra
                 fig = _build_single_plot(
                     dataset, filtered_df, multi_plot_type,
                     x_col=multi_x, y_col=y_col, color_col=multi_color,
-                    title=title, agg_func=multi_agg,
+                    title=title, agg_func=multi_agg, points=multi_points,
                 )
                 if fig:
                     figs.append({"title": title, "fig": fig})
@@ -814,7 +819,7 @@ def render_multi_plot_builder(dataset: HistologyDataset, filtered_df: pd.DataFra
             cols = st.columns(len(row_items))
             for col, item in zip(cols, row_items):
                 with col:
-                    st.plotly_chart(item["fig"], use_container_width=True)
+                    st.plotly_chart(item["fig"], width="stretch")
 
         if st.button("Clear Multi Plots", key="clear_multi"):
             st.session_state.multi_plots = []
@@ -880,7 +885,7 @@ def render_data_processing(dataset: HistologyDataset, filtered_df: pd.DataFrame)
             filtered_df, cleaned, outlier_metric,
             lower, upper, len(removed), method=outlier_method.upper(),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         st.info(f"Lower bound: {lower:.4f} | Upper bound: {upper:.4f} | Removed: {len(removed)} rows")
 
         if apply_btn:
@@ -913,7 +918,7 @@ def render_data_table(filtered_df: pd.DataFrame):
         ).any(axis=1)
         display_df = display_df[mask]
 
-    st.dataframe(display_df.head(max_rows), use_container_width=True, height=400)
+    st.dataframe(display_df.head(max_rows), width="stretch", height=400)
 
     csv_data = display_df.to_csv(index=False).encode()
     st.download_button("Download Filtered Data (CSV)", data=csv_data,
@@ -973,7 +978,7 @@ def render_summary_stats(dataset: HistologyDataset, filtered_df: pd.DataFrame):
         st.write(", ".join(clean_pheno[:15]))
 
     with st.expander("Descriptive Statistics", expanded=False):
-        st.dataframe(filtered_df.describe(), use_container_width=True)
+        st.dataframe(filtered_df.describe(), width="stretch")
 
 
 # ── Report Download ──────────────────────────────────────────────────────────
@@ -1193,7 +1198,7 @@ def render_metadata_tab(dataset: HistologyDataset, filtered_df: pd.DataFrame):
 
             edited = st.data_editor(
                 edit_df,
-                use_container_width=True,
+                width="stretch",
                 num_rows="fixed",
                 height=300,
                 key="meta_editor",
@@ -1234,7 +1239,7 @@ def render_metadata_tab(dataset: HistologyDataset, filtered_df: pd.DataFrame):
             st.metric("Matched Samples", f"{len(matched)} / {len(dataset.sample_ids)}")
 
         with st.expander("Preview Metadata", expanded=False):
-            st.dataframe(meta.df, use_container_width=True, height=200)
+            st.dataframe(meta.df, width="stretch", height=200)
 
         st.markdown("#### Merge & Aggregate")
 
@@ -1320,7 +1325,7 @@ def render_metadata_tab(dataset: HistologyDataset, filtered_df: pd.DataFrame):
                 pct_cols = [c for c in agg_df.columns if c.startswith("% ")]
                 display_cols = agg_groups + ["Object Count"] + pct_cols
                 display_cols = [c for c in display_cols if c in agg_df.columns]
-                st.dataframe(agg_df[display_cols], use_container_width=True, height=300)
+                st.dataframe(agg_df[display_cols], width="stretch", height=300)
 
                 if st.button("Use Aggregated Data for Plotting", key="use_agg"):
                     st.session_state.dataset = parse_histology_data(
