@@ -32,7 +32,7 @@ from homer_core.plotting import (
     fig_to_png_bytes, fig_to_svg_bytes,
 )
 from homer_core.report_generator import ReportBuilder, generate_data_summary_page
-from homer_core.sample_data import generate_object_data, generate_summary_data, generate_cluster_data
+from homer_core.sample_data import generate_object_data, generate_summary_data, generate_cluster_data, PROFILE_NAMES, DEFAULT_PROFILE
 from homer_core.metadata import (
     load_metadata_csv, merge_metadata, create_empty_metadata,
     metadata_template_csv, calculate_per_image_percentages,
@@ -279,9 +279,9 @@ async def handle_upload(e: events.UploadEventArguments, force_type_select, max_j
         ui.notify(f"Error loading file: {ex}", type="negative")
 
 
-def load_demo(demo_type: str, n_samples: int = 8, n_objects: int = 5000, auto_agg: bool = True):
+def load_demo(demo_type: str, n_samples: int = 8, n_objects: int = 5000, auto_agg: bool = True, profile: str | None = None):
     if demo_type == "object":
-        df = generate_object_data(n_cells=n_objects, n_images=n_samples)
+        df = generate_object_data(n_cells=n_objects, n_images=n_samples, profile=profile)
         dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
         state.dataset = dataset
         state.filters = {}
@@ -312,11 +312,11 @@ def load_demo(demo_type: str, n_samples: int = 8, n_objects: int = 5000, auto_ag
                 force_type="summary",
             )
     elif demo_type == "summary":
-        df = generate_summary_data(n_images=n_samples)
+        df = generate_summary_data(n_images=n_samples, profile=profile)
         state.dataset = parse_histology_data(df, "demo_summary_data.csv")
         state.filters = {}
     elif demo_type == "cluster":
-        df = generate_cluster_data(n_clusters=n_objects, n_images=n_samples)
+        df = generate_cluster_data(n_clusters=n_objects, n_images=n_samples, profile=profile)
         state.dataset = parse_histology_data(df, "demo_cluster_data.csv", force_type="cluster")
         state.filters = {}
     ui.notify(f"Loaded {demo_type} demo data ({n_samples} samples)", type="positive")
@@ -1300,6 +1300,11 @@ def index():
         ui.separator()
         ui.html('<div class="sidebar-section-title">Quick Start &mdash; Demo Data</div>')
 
+        demo_profile_sel = ui.select(
+            PROFILE_NAMES, label="Organ / Panel Profile",
+            value=DEFAULT_PROFILE,
+        ).classes("w-full").tooltip("Select a tissue/organ panel with literature-based markers")
+
         with ui.expansion("Simulation Settings", icon="tune").classes("w-full"):
             demo_n_samples = ui.number("Samples / images", value=8, min=2, max=100, step=1).classes("w-full")
             demo_n_objects = ui.number("Objects / cells", value=5000, min=100, max=100000, step=500).classes("w-full")
@@ -1307,9 +1312,9 @@ def index():
                 "Automatically aggregate per-cell object data into per-image percentages for immediate plotting by Treatment, Genotype, etc.")
 
         with ui.row().classes("w-full gap-2"):
-            ui.button("Object", on_click=lambda: load_demo("object", int(demo_n_samples.value), int(demo_n_objects.value), demo_auto_agg.value), color="primary").props("dense").classes("flex-1")
-            ui.button("Summary", on_click=lambda: load_demo("summary", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
-            ui.button("Cluster", on_click=lambda: load_demo("cluster", int(demo_n_samples.value), int(demo_n_objects.value)), color="primary").props("dense").classes("flex-1")
+            ui.button("Object", on_click=lambda: load_demo("object", int(demo_n_samples.value), int(demo_n_objects.value), demo_auto_agg.value, demo_profile_sel.value), color="primary").props("dense").classes("flex-1")
+            ui.button("Summary", on_click=lambda: load_demo("summary", int(demo_n_samples.value), int(demo_n_objects.value), profile=demo_profile_sel.value), color="primary").props("dense").classes("flex-1")
+            ui.button("Cluster", on_click=lambda: load_demo("cluster", int(demo_n_samples.value), int(demo_n_objects.value), profile=demo_profile_sel.value), color="primary").props("dense").classes("flex-1")
 
         ui.separator()
         sidebar_info()

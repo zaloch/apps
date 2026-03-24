@@ -30,7 +30,7 @@ from homer_core.plotting import (
     fig_to_png_bytes, fig_to_svg_bytes,
 )
 from homer_core.report_generator import ReportBuilder, generate_data_summary_page
-from homer_core.sample_data import generate_object_data, generate_summary_data, generate_cluster_data
+from homer_core.sample_data import generate_object_data, generate_summary_data, generate_cluster_data, PROFILE_NAMES, DEFAULT_PROFILE
 from homer_core.metadata import (
     load_metadata_csv, merge_metadata, create_empty_metadata,
     metadata_template_csv, calculate_per_image_percentages,
@@ -352,6 +352,13 @@ def render_sidebar():
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-section-title">Quick Start &mdash; Demo Data</div>', unsafe_allow_html=True)
 
+    demo_profile = st.sidebar.selectbox(
+        "Organ / Panel Profile", PROFILE_NAMES,
+        index=PROFILE_NAMES.index(DEFAULT_PROFILE),
+        key="demo_profile",
+        help="Select a tissue/organ panel with literature-based markers",
+    )
+
     with st.sidebar.expander("Simulation Settings"):
         demo_n_samples = st.number_input("Number of samples / images", min_value=2, max_value=100, value=8, step=1, key="demo_n_samples")
         demo_n_objects = st.number_input("Number of objects / cells", min_value=100, max_value=100000, value=5000, step=500, key="demo_n_objects")
@@ -364,7 +371,7 @@ def render_sidebar():
     load_demo_cluster = dc3.button("Cluster", width="stretch")
 
     if load_demo_object:
-        df = generate_object_data(n_cells=demo_n_objects, n_images=demo_n_samples)
+        df = generate_object_data(n_cells=demo_n_objects, n_images=demo_n_samples, profile=demo_profile)
         dataset = parse_histology_data(df, "demo_object_data.csv", force_type="object")
         st.session_state.dataset = dataset
         st.session_state.filters = {}
@@ -400,13 +407,13 @@ def render_sidebar():
         st.rerun()
 
     if load_demo_summary:
-        df = generate_summary_data(n_images=demo_n_samples)
+        df = generate_summary_data(n_images=demo_n_samples, profile=demo_profile)
         st.session_state.dataset = parse_histology_data(df, "demo_summary_data.csv")
         st.session_state.filters = {}
         st.rerun()
 
     if load_demo_cluster:
-        df = generate_cluster_data(n_clusters=demo_n_objects, n_images=demo_n_samples)
+        df = generate_cluster_data(n_clusters=demo_n_objects, n_images=demo_n_samples, profile=demo_profile)
         st.session_state.dataset = parse_histology_data(df, "demo_cluster_data.csv", force_type="cluster")
         st.session_state.filters = {}
         st.rerun()
