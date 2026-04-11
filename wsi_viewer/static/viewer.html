@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WSI Viewer</title>
+  <script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/openseadragon.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #eee;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 14px;
+      background: #1e1e2e;
+      border-bottom: 1px solid #333;
+      flex-shrink: 0;
+      min-height: 38px;
+    }
+
+    #back-btn {
+      color: #a6e3a1;
+      text-decoration: none;
+      font-size: 0.85rem;
+      padding: 3px 8px;
+      border: 1px solid #2e4e2e;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    #back-btn:hover { background: #1e2e20; }
+
+    #slide-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #ccc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 400px;
+    }
+
+    #dims {
+      font-size: 0.72rem;
+      color: #555;
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    #viewer {
+      flex: 1;
+      background: #000;
+    }
+
+    #controls {
+      position: fixed;
+      bottom: 14px;
+      right: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      z-index: 100;
+    }
+
+    .ctrl {
+      background: #1e1e2ecc;
+      border: 1px solid #444;
+      color: #eee;
+      border-radius: 4px;
+      padding: 5px 11px;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+
+    .ctrl:hover { background: #2e2e4ecc; }
+
+    #zoom-label {
+      font-size: 0.72rem;
+      color: #666;
+      text-align: center;
+    }
+
+    #loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #111;
+      font-size: 0.9rem;
+      color: #555;
+      z-index: 50;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <a id="back-btn" href="/">&#8592; Slides</a>
+  <span id="slide-name">Loading…</span>
+  <span id="dims"></span>
+</header>
+
+<div id="viewer">
+  <div id="loading">Opening slide…</div>
+</div>
+
+<div id="controls">
+  <span id="zoom-label">—</span>
+  <button class="ctrl" id="btn-fit">Fit</button>
+  <button class="ctrl" id="btn-1x">1:1</button>
+</div>
+
+<script>
+  // Read ?id=N from URL
+  const params = new URLSearchParams(location.search);
+  const id = parseInt(params.get('id') ?? '0', 10);
+
+  if (isNaN(id)) {
+    document.getElementById('slide-name').textContent = 'Invalid slide id';
+  } else {
+    // Populate slide name from the catalogue
+    fetch('/api/files')
+      .then(r => r.json())
+      .then(files => {
+        const entry = files.find(f => f.id === id);
+        if (entry) document.getElementById('slide-name').textContent = entry.name;
+      });
+
+    // Build DZI tile source URL for this slide
+    const dziUrl = `/slide/${id}/dzi`;
+
+    const viewer = OpenSeadragon({
+      id: 'viewer',
+      prefixUrl: 'https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/images/',
+
+      // Point at our DZI endpoint; tile URL is constructed as dziUrl + '_files/...'
+      // We override the tile URL by using the explicit DZI URL pattern.
+      tileSources: dziUrl,
+
+      showNavigator: true,
+      navigatorPosition: 'TOP_LEFT',
+      navigatorSizeRatio: 0.16,
+      showNavigationControl: false,
+
+      minZoomImageRatio: 0.05,
+      maxZoomPixelRatio: 8,
+      visibilityRatio: 0.3,
+      animationTime: 0.3,
+      springStiffness: 10,
+      imageLoaderLimit: 4,
+    });
+
+    viewer.addHandler('open', () => {
+      document.getElementById('loading').style.display = 'none';
+      const src = viewer.world.getItemAt(0);
+      if (!src) return;
+      const { x: w, y: h } = src.getContentSize();
+      document.getElementById('dims').textContent =
+        `${w.toLocaleString()} × ${h.toLocaleString()} px`;
+    });
+
+    viewer.addHandler('zoom', ({ zoom }) => {
+      document.getElementById('zoom-label').textContent = zoom.toFixed(3) + '×';
+    });
+
+    document.getElementById('btn-fit').addEventListener('click', () => {
+      viewer.viewport.goHome(true);
+    });
+
+    document.getElementById('btn-1x').addEventListener('click', () => {
+      const src = viewer.world.getItemAt(0);
+      if (!src) return;
+      const iw = src.getContentSize().x;
+      const vw = viewer.viewport.getContainerSize().x;
+      viewer.viewport.zoomTo(iw / vw, null, true);
+    });
+  }
+</script>
+</body>
+</html>
