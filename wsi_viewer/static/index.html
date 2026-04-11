@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WSI Viewer</title>
+  <script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/openseadragon.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #eee;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      background: #1e1e2e;
+      border-bottom: 1px solid #333;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: #a6e3a1;
+    }
+
+    #info {
+      font-size: 0.75rem;
+      color: #888;
+      margin-left: auto;
+    }
+
+    #viewer {
+      flex: 1;
+      background: #000;
+    }
+
+    /* OSD navigator */
+    .navigator {
+      border: 1px solid #444 !important;
+      border-radius: 4px;
+    }
+
+    #controls {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 100;
+    }
+
+    button.ctrl {
+      background: #1e1e2e;
+      border: 1px solid #444;
+      color: #eee;
+      border-radius: 4px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button.ctrl:hover { background: #2e2e4e; }
+
+    #zoom-label {
+      font-size: 0.75rem;
+      color: #888;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>&#128300; WSI Viewer</h1>
+  <span id="info">loading…</span>
+</header>
+
+<div id="viewer"></div>
+
+<div id="controls">
+  <span id="zoom-label">zoom: —</span>
+  <button class="ctrl" id="btn-fit">Fit</button>
+  <button class="ctrl" id="btn-home">1:1</button>
+</div>
+
+<script>
+  const viewer = OpenSeadragon({
+    id: 'viewer',
+    prefixUrl: 'https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/images/',
+    tileSources: '/dzi',
+
+    // Navigation / interaction
+    showNavigator: true,
+    navigatorPosition: 'TOP_LEFT',
+    navigatorSizeRatio: 0.18,
+    showNavigationControl: false,
+
+    // Zoom limits
+    minZoomImageRatio: 0.05,
+    maxZoomPixelRatio: 8,
+    visibilityRatio: 0.3,
+
+    // Smooth pan / zoom
+    animationTime: 0.3,
+    springStiffness: 10,
+
+    // Image quality
+    imageLoaderLimit: 4,
+    immediateRender: false,
+  });
+
+  // ── Info bar ────────────────────────────────────────────────────────────────
+  viewer.addHandler('open', () => {
+    const src = viewer.world.getItemAt(0);
+    if (!src) return;
+    const { x: w, y: h } = src.getContentSize();
+    document.getElementById('info').textContent =
+      `${w.toLocaleString()} × ${h.toLocaleString()} px`;
+  });
+
+  viewer.addHandler('zoom', ({ zoom }) => {
+    document.getElementById('zoom-label').textContent =
+      'zoom: ' + zoom.toFixed(2) + 'x';
+  });
+
+  // ── Button controls ─────────────────────────────────────────────────────────
+  document.getElementById('btn-fit').addEventListener('click', () => {
+    viewer.viewport.goHome(true);
+  });
+
+  document.getElementById('btn-home').addEventListener('click', () => {
+    // Zoom to 1:1 pixel ratio, centred.
+    const src = viewer.world.getItemAt(0);
+    if (!src) return;
+    const { x: iw } = src.getContentSize();
+    const vw = viewer.viewport.getContainerSize().x;
+    viewer.viewport.zoomTo(iw / vw, null, true);
+    viewer.viewport.panTo(viewer.viewport.getCenter(), true);
+  });
+</script>
+</body>
+</html>
