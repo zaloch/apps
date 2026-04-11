@@ -8,38 +8,60 @@ description = "Web viewer for whole-slide images (WSI/CZI) using DZI tile protoc
 name = "wsi-viewer"
 path = "src/main.rs"
 
+# ── Features ──────────────────────────────────────────────────────────────────
+#
+# bioformats: broadest format support (SVS, NDPI, SCN, OME-TIFF, DICOM, LIF …)
+#   Requires libhdf5-dev on Linux/macOS.
+#   On Windows, install HDF5 from https://www.hdfgroup.org/downloads/hdf5/
+#   or build statically:
+#     cargo build --release --features bioformats --features hdf5-static
+#
+# hdf5-static: compile HDF5 from source instead of linking the system library.
+#   Needs CMake + a C compiler (MSVC on Windows, gcc/clang on Linux/macOS).
+#
+# default: bioformats enabled.  Disable for a zero-native-dep Windows build:
+#   cargo build --release --no-default-features
+[features]
+default       = ["bioformats"]
+bioformats    = ["dep:bioformats"]
+hdf5-static   = ["hdf5-metno/static"]
+
 [dependencies]
 # Web framework
-axum = { version = "0.7", features = ["tokio"] }
-tokio = { version = "1", features = ["full"] }
+axum       = { version = "0.7", features = ["tokio"] }
+tokio      = { version = "1",   features = ["full"]  }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 
-# ── Slide reading (pure Rust, zero native deps) ───────────────────────────────
-# Priority: bioformats → czi-rs → openslide-pure-rs (first success wins)
+# ── Slide backends (pure Rust, no openslide) ──────────────────────────────────
 
-# Broad format coverage: SVS, NDPI, SCN, CZI, OME-TIFF, DICOM, LIF, ND2, …
-bioformats = "0.1"
+# Optional: broadest format coverage (requires libhdf5 or hdf5-static feature)
+bioformats = { version = "0.1", optional = true }
 
-# Dedicated Zeiss CZI reader
+# Force HDF5 static compilation when the hdf5-static feature is requested.
+# This is a no-op unless hdf5-static is enabled; the version pin must match
+# the version bioformats itself pulls in.
+hdf5-metno = { version = "0.12", optional = true }
+
+# Dedicated Zeiss CZI reader — pure Rust, zero native deps
 czi-rs = "0.1"
 
-# Pure-Rust Mirax (.mrxs) reader (and future WSI formats)
+# Pure-Rust Mirax (.mrxs) reader — pure Rust, zero native deps
 openslide-pure-rs = "0.1"
 
 # Image encoding / manipulation
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "rayon"] }
 
 # Serialisation
-serde = { version = "1", features = ["derive"] }
+serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
 
 # Error handling
-anyhow = "1"
+anyhow    = "1"
 thiserror = "1"
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing             = "0.1"
+tracing-subscriber  = { version = "0.3", features = ["env-filter", "fmt"] }

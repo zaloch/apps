@@ -1,9 +1,10 @@
 use anyhow::{bail, Context, Result};
 use image::RgbaImage;
-use std::{
-    path::Path,
-    sync::{Arc, Mutex},
-};
+use std::path::Path;
+use std::sync::Arc;
+
+#[cfg(feature = "bioformats")]
+use std::sync::Mutex;
 
 // ─── Public trait ────────────────────────────────────────────────────────────
 
@@ -35,7 +36,8 @@ pub trait Slide: Send + Sync {
 pub fn open(path: &Path) -> Result<Arc<dyn Slide>> {
     let name = path.display();
 
-    // 1. bioformats — broadest format coverage
+    // 1. bioformats — broadest format coverage (only when feature is enabled)
+    #[cfg(feature = "bioformats")]
     match BioBackend::open(path) {
         Ok(s) => {
             tracing::debug!("bioformats opened {name}");
@@ -69,6 +71,7 @@ pub fn open(path: &Path) -> Result<Arc<dyn Slide>> {
 //
 // FormatReader is Send+Sync by trait bound, so Mutex<ImageReader> is fine.
 
+#[cfg(feature = "bioformats")]
 struct BioBackend {
     /// Mutable reader wrapped for concurrent tile requests.
     reader: Mutex<bioformats::ImageReader>,
@@ -83,6 +86,7 @@ struct BioBackend {
     size_c: u32,
 }
 
+#[cfg(feature = "bioformats")]
 impl BioBackend {
     fn open(path: &Path) -> Result<Self> {
         let mut reader = bioformats::ImageReader::open(path)?;
@@ -126,6 +130,7 @@ impl BioBackend {
     }
 }
 
+#[cfg(feature = "bioformats")]
 impl Slide for BioBackend {
     fn dimensions(&self) -> Result<(u64, u64)> {
         Ok(self.level_dims[0])
@@ -174,6 +179,7 @@ impl Slide for BioBackend {
 }
 
 /// Convert raw `open_bytes_region` bytes to an RGBA image.
+#[cfg(feature = "bioformats")]
 fn bytes_to_rgba(
     bytes: &[u8],
     w: u32,
