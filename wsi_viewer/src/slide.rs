@@ -44,19 +44,30 @@ pub fn open(path: &Path) -> Result<Arc<dyn Slide>> {
             Ok(Arc::new(s))
         }
         _ => {
-            let s = OsBackend::open(path)
-                .with_context(|| format!("opening slide: {}", path.display()))?;
-            Ok(Arc::new(s))
+            #[cfg(feature = "openslide")]
+            {
+                let s = OsBackend::open(path)
+                    .with_context(|| format!("opening slide: {}", path.display()))?;
+                return Ok(Arc::new(s));
+            }
+            #[cfg(not(feature = "openslide"))]
+            bail!(
+                "Format '.{ext}' requires OpenSlide support, which is not compiled in.\n\
+                 Rebuild with:  cargo build --release --features openslide\n\
+                 (requires the libopenslide system library — see openslide.org)"
+            );
         }
     }
 }
 
-// ─── OpenSlide backend ───────────────────────────────────────────────────────
+// ─── OpenSlide backend (requires --features openslide) ───────────────────────
 
+#[cfg(feature = "openslide")]
 struct OsBackend {
     inner: openslide_rs::OpenSlide,
 }
 
+#[cfg(feature = "openslide")]
 impl OsBackend {
     fn open(path: &Path) -> Result<Self> {
         let inner = openslide_rs::OpenSlide::new(path)?;
@@ -64,9 +75,9 @@ impl OsBackend {
     }
 }
 
+#[cfg(feature = "openslide")]
 impl Slide for OsBackend {
     fn dimensions(&self) -> Result<(u64, u64)> {
-        // level 0 = full resolution
         let s = self.inner.get_level_dimensions(0)?;
         Ok((s.w as u64, s.h as u64))
     }
@@ -92,7 +103,6 @@ impl Slide for OsBackend {
         use openslide_rs::{Address, Region, Size};
         let region = Region {
             address: Address {
-                // openslide-rs 2.4 uses u32 for address coordinates
                 x: x.min(u32::MAX as u64) as u32,
                 y: y.min(u32::MAX as u64) as u32,
             },
@@ -103,18 +113,16 @@ impl Slide for OsBackend {
     }
 }
 
-// ─── CZI backend ─────────────────────────────────────────────────────────────
+// ─── CZI backend (pure Rust, no native deps) ─────────────────────────────────
 //
-// czi-rs 0.1 loads subblocks on demand via the CziFile reader.
-// Because CziFile contains a non-Sync BufReader we pre-decode the
-// first plane into an RgbaImage and only keep that in memory.
-// This is appropriate for most research/demo CZI files; very large
-// multi-terabyte acquisitions would need a streaming approach.
+// czi-rs 0.1 reads subblocks on demand via an internal BufReader.
+// Because BufReader<File> is not Sync we pre-decode the first plane into an
+// RgbaImage and keep only that in memory.  Suitable for most research/demo
+// CZI files; very large multi-TB acquisitions would need a streaming approach.
 
 struct CziBackend {
     width: u64,
     height: u64,
-    /// Full decoded first plane, ready for cropping.
     image: RgbaImage,
 }
 
@@ -124,28 +132,23 @@ impl CziBackend {
 
         let mut czi = CziFile::open(path)?;
 
-        // Get dimensions from the bounding box of layer 0.
         let stats = czi.statistics();
         let rect = stats
             .bounding_box_layer0
             .or(stats.bounding_box)
-            .with_context(|| "CZI: no bounding box found in file")?;
+            .context("CZI: no bounding box found in file")?;
 
         let width = rect.w as u64;
         let height = rect.h as u64;
 
-        // Read the first (default) plane.
-        let plane_index = PlaneIndex::new();
-        let bitmap = czi.read_plane(&plane_index)?;
-
-        // Convert Bitmap to RgbaImage based on pixel type.
+        let bitmap = czi.read_plane(&PlaneIndex::new())?;
         let image = bitmap_to_rgba(&bitmap)?;
 
         Ok(Self { width, height, image })
     }
 }
 
-/// Convert a czi-rs Bitmap to RgbaImage, handling common pixel layouts.
+/// Convert a czi-rs `Bitmap` to `RgbaImage`, handling common pixel layouts.
 fn bitmap_to_rgba(bm: &czi_rs::Bitmap) -> Result<RgbaImage> {
     use czi_rs::PixelType;
 
@@ -155,46 +158,29 @@ fn bitmap_to_rgba(bm: &czi_rs::Bitmap) -> Result<RgbaImage> {
     let mut rgba = vec![0u8; w as usize * h as usize * 4];
 
     match bm.pixel_type {
-        // BGR → RGB + alpha=255
         PixelType::Bgr24 => {
             for (i, chunk) in src.chunks_exact(3).enumerate() {
-                let out = &mut rgba[i * 4..i * 4 + 4];
-                out[0] = chunk[2]; // R
-                out[1] = chunk[1]; // G
-                out[2] = chunk[0]; // B
-                out[3] = 255;
+                let p = &mut rgba[i * 4..i * 4 + 4];
+                p[0] = chunk[2]; p[1] = chunk[1]; p[2] = chunk[0]; p[3] = 255;
             }
         }
-        // BGRA → RGBA
         PixelType::Bgra32 => {
             for (i, chunk) in src.chunks_exact(4).enumerate() {
-                let out = &mut rgba[i * 4..i * 4 + 4];
-                out[0] = chunk[2]; // R
-                out[1] = chunk[1]; // G
-                out[2] = chunk[0]; // B
-                out[3] = chunk[3]; // A
+                let p = &mut rgba[i * 4..i * 4 + 4];
+                p[0] = chunk[2]; p[1] = chunk[1]; p[2] = chunk[0]; p[3] = chunk[3];
             }
         }
-        // Greyscale 8-bit → RGB grey + alpha=255
         PixelType::Gray8 => {
             for (i, &g) in src.iter().enumerate() {
-                let out = &mut rgba[i * 4..i * 4 + 4];
-                out[0] = g;
-                out[1] = g;
-                out[2] = g;
-                out[3] = 255;
+                let p = &mut rgba[i * 4..i * 4 + 4];
+                p[0] = g; p[1] = g; p[2] = g; p[3] = 255;
             }
         }
-        // Greyscale 16-bit (little-endian) → scale to 8-bit
         PixelType::Gray16 => {
             for (i, chunk) in src.chunks_exact(2).enumerate() {
-                let val16 = u16::from_le_bytes([chunk[0], chunk[1]]);
-                let g = (val16 >> 8) as u8;
-                let out = &mut rgba[i * 4..i * 4 + 4];
-                out[0] = g;
-                out[1] = g;
-                out[2] = g;
-                out[3] = 255;
+                let g = (u16::from_le_bytes([chunk[0], chunk[1]]) >> 8) as u8;
+                let p = &mut rgba[i * 4..i * 4 + 4];
+                p[0] = g; p[1] = g; p[2] = g; p[3] = 255;
             }
         }
         other => bail!("CZI: unsupported pixel type {:?}", other),
@@ -208,48 +194,34 @@ impl Slide for CziBackend {
         Ok((self.width, self.height))
     }
 
-    fn level_count(&self) -> Result<u32> {
-        Ok(1)
-    }
+    fn level_count(&self) -> Result<u32> { Ok(1) }
 
     fn level_dimensions(&self, _level: u32) -> Result<(u64, u64)> {
         Ok((self.width, self.height))
     }
 
-    fn level_downsample(&self, _level: u32) -> Result<f64> {
-        Ok(1.0)
-    }
+    fn level_downsample(&self, _level: u32) -> Result<f64> { Ok(1.0) }
 
-    fn best_level_for_downsample(&self, _downsample: f64) -> Result<u32> {
-        Ok(0)
-    }
+    fn best_level_for_downsample(&self, _downsample: f64) -> Result<u32> { Ok(0) }
 
     fn read_region(&self, x: u64, y: u64, _level: u32, w: u32, h: u32) -> Result<RgbaImage> {
-        let x = x as u32;
-        let y = y as u32;
-        let img_w = self.width as u32;
-        let img_h = self.height as u32;
+        let (x, y) = (x as u32, y as u32);
+        let (iw, ih) = (self.width as u32, self.height as u32);
 
-        let x2 = (x + w).min(img_w);
-        let y2 = (y + h).min(img_h);
-
-        if x >= img_w || y >= img_h {
-            // Return a blank tile for out-of-bounds requests.
+        if x >= iw || y >= ih {
             return Ok(RgbaImage::from_pixel(w, h, image::Rgba([0, 0, 0, 255])));
         }
 
-        let crop = image::imageops::crop_imm(&self.image, x, y, x2 - x, y2 - y).to_image();
+        let crop = image::imageops::crop_imm(
+            &self.image, x, y,
+            (x + w).min(iw) - x,
+            (y + h).min(ih) - y,
+        ).to_image();
 
-        // Resize to the requested size (handles edge tiles at image boundary).
         if crop.width() == w && crop.height() == h {
             Ok(crop)
         } else {
-            Ok(image::imageops::resize(
-                &crop,
-                w,
-                h,
-                image::imageops::FilterType::Triangle,
-            ))
+            Ok(image::imageops::resize(&crop, w, h, image::imageops::FilterType::Triangle))
         }
     }
 }
