@@ -1,0 +1,45 @@
+[package]
+name = "wsi-viewer"
+version = "0.1.0"
+edition = "2021"
+description = "Web viewer for whole-slide images (WSI/CZI) using DZI tile protocol"
+
+[[bin]]
+name = "wsi-viewer"
+path = "src/main.rs"
+
+[dependencies]
+# Web framework
+axum = { version = "0.7", features = ["tokio"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# ── Slide reading (pure Rust, zero native deps) ───────────────────────────────
+# Priority: bioformats → czi-rs → openslide-pure-rs (first success wins)
+
+# Broad format coverage: SVS, NDPI, SCN, CZI, OME-TIFF, DICOM, LIF, ND2, …
+bioformats = "0.1"
+
+# Dedicated Zeiss CZI reader
+czi-rs = "0.1"
+
+# Pure-Rust Mirax (.mrxs) reader (and future WSI formats)
+openslide-pure-rs = "0.1"
+
+# Image encoding / manipulation
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "rayon"] }
+
+# Serialisation
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

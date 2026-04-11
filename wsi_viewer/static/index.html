@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WSI Viewer — Select slide</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #ddd;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 48px 24px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #a6e3a1;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+
+    header p {
+      font-size: 0.85rem;
+      color: #666;
+    }
+
+    #file-list {
+      width: 100%;
+      max-width: 680px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .slide-card {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: #1e1e2e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 16px 20px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.15s, background 0.15s;
+      cursor: pointer;
+    }
+
+    .slide-card:hover {
+      border-color: #a6e3a1;
+      background: #1e2e20;
+    }
+
+    .slide-icon {
+      font-size: 1.6rem;
+      flex-shrink: 0;
+    }
+
+    .slide-name {
+      font-size: 0.95rem;
+      font-weight: 500;
+      word-break: break-all;
+    }
+
+    .slide-badge {
+      margin-left: auto;
+      font-size: 0.7rem;
+      background: #2a2a3e;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 2px 7px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      flex-shrink: 0;
+    }
+
+    #status {
+      font-size: 0.8rem;
+      color: #555;
+      margin-bottom: 20px;
+    }
+
+    #search {
+      width: 100%;
+      max-width: 680px;
+      background: #1e1e2e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 10px 16px;
+      color: #ddd;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+      outline: none;
+    }
+
+    #search:focus { border-color: #a6e3a1; }
+
+    #search::placeholder { color: #555; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>&#128300; WSI Viewer</h1>
+  <p>Select a slide to open</p>
+</header>
+
+<input id="search" type="text" placeholder="Filter slides…" autocomplete="off">
+<p id="status">Loading…</p>
+<div id="file-list"></div>
+
+<script>
+  const list  = document.getElementById('file-list');
+  const status = document.getElementById('status');
+  const search = document.getElementById('search');
+
+  let allFiles = [];
+
+  function ext(name) {
+    const dot = name.lastIndexOf('.');
+    return dot >= 0 ? name.slice(dot + 1).toUpperCase() : '';
+  }
+
+  function render(files) {
+    list.innerHTML = '';
+    files.forEach(f => {
+      const a = document.createElement('a');
+      a.className = 'slide-card';
+      a.href = `/viewer?id=${f.id}`;
+      a.innerHTML = `
+        <span class="slide-icon">&#127981;</span>
+        <span class="slide-name">${f.name}</span>
+        <span class="slide-badge">${ext(f.name)}</span>`;
+      list.appendChild(a);
+    });
+  }
+
+  fetch('/api/files')
+    .then(r => r.json())
+    .then(files => {
+      allFiles = files;
+      status.textContent = `${files.length} slide${files.length !== 1 ? 's' : ''} found`;
+      render(files);
+    })
+    .catch(e => { status.textContent = 'Failed to load slide list: ' + e; });
+
+  search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    render(q ? allFiles.filter(f => f.name.toLowerCase().includes(q)) : allFiles);
+  });
+</script>
+</body>
+</html>
